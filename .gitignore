@@ -5,3 +5,4 @@ assets/*crest*
 # Original offline prototype (contains the embedded crest).
 prototype/
 .claude/
+supabase-setup-once.sql
