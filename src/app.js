@@ -98,7 +98,18 @@ async function run(fn, okMessage) {
 // ------------------------------------------------------------------ shell
 const navItems = [['home', 'Genel Bakış', 'home', 'Özet'], ['fixtures', 'Fikstür', 'calendar', 'Maçlar'], ['standings', 'Puan Durumu', 'chart', 'Puan'], ['players', 'Oyuncular', 'users', 'Oyuncular'], ['seasons', 'Sezonlar', 'archive', 'Sezon'], ['admin', 'Yönetim', 'settings', 'Yönetim']];
 const visibleNav = () => navItems.filter(n => n[0] !== 'admin' || isAdmin());
-function navButton([key, label, ic, short], mobile = false) { return `<button type="button" data-nav="${key}" class="${view === key ? 'active' : ''}" aria-current="${view === key ? 'page' : 'false'}">${icon(ic, mobile ? 20 : 18)}<span>${mobile ? short : label}</span></button>`; }
+/* What needs this user's attention: results waiting for their confirmation, and for admins,
+   accounts waiting for approval plus disputed results. Shown as badges and in the tab title. */
+function actionCounts() {
+  const pid = myPlayerId(), matches = allMatches();
+  const fixtures = pid ? matches.filter(m => m.status === 'pending' && m.pendingBy !== pid && (m.a === pid || m.b === pid)).length : 0;
+  const admin = isAdmin() ? data.profiles.filter(p => p.status === 'pending').length + matches.filter(m => m.status === 'disputed').length : 0;
+  return { fixtures, admin, total: fixtures + admin };
+}
+function navButton([key, label, ic, short], mobile = false, counts = {}) {
+  const n = counts[key] || 0, badge = n ? `<span class="nav-badge" aria-label="${n} bekleyen işlem">${n > 9 ? '9+' : n}</span>` : '';
+  return `<button type="button" data-nav="${key}" class="${view === key ? 'active' : ''}" aria-current="${view === key ? 'page' : 'false'}">${icon(ic, mobile ? 20 : 18)}<span>${mobile ? short : label}</span>${badge}</button>`;
+}
 
 function accountButton() {
   if (!session) return `<button type="button" class="btn small" data-action="login">${icon('user', 15)} Giriş yap</button>`;
@@ -107,15 +118,16 @@ function accountButton() {
 
 function render() {
   const s = activeSeason();
-  document.title = (s?.name ? s.name + ' | ' : '') + 'SJ Kelimelik';
+  const counts = actionCounts();
+  document.title = (counts.total ? `(${counts.total}) ` : '') + (s?.name ? s.name + ' | ' : '') + 'SJ Kelimelik';
   const footNote = !session ? 'Sonuçları herkes görebilir. Maç sonucu girmek için giriş yapın.'
     : me?.status === 'pending' ? 'Hesabınız yönetici onayı bekliyor.'
     : me?.status === 'rejected' ? 'Hesabınız onaylanmadı.'
     : isAdmin() ? 'Yönetici olarak giriş yaptınız.' : 'Sonuçlar rakip onayıyla kesinleşir.';
-  $('#app').innerHTML = `<div class="shell"><aside class="sidebar"><div class="brand"><div class="brand-crest">${crest()}</div><div><strong>SJ Kelimelik</strong></div></div><div><div class="side-label">MENÜ</div><nav class="nav" aria-label="Ana menü">${visibleNav().map(n => navButton(n)).join('')}</nav></div><div class="sidebar-foot"><strong>${icon('info', 14)} ${session ? esc(me?.username || '') : 'Ziyaretçi'}</strong>${footNote}</div></aside>
+  $('#app').innerHTML = `<div class="shell"><aside class="sidebar"><div class="brand"><div class="brand-crest">${crest()}</div><div><strong>SJ Kelimelik</strong></div></div><div><div class="side-label">MENÜ</div><nav class="nav" aria-label="Ana menü">${visibleNav().map(n => navButton(n, false, counts)).join('')}</nav></div><div class="sidebar-foot"><strong>${icon('info', 14)} ${session ? esc(me?.username || '') : 'Ziyaretçi'}</strong>${footNote}</div></aside>
   <main class="main"><header class="topbar"><div class="topbar-left"><span class="mobile-crest">${crest()}</span><div class="topbar-title">SJ KELİMELİK<b>${esc(s?.name || 'Henüz sezon yok')}</b></div><span class="mobile-theme">${themeButton()}</span></div><div class="topbar-right">${themeButton()}${data.seasons.length ? `<label class="sr-only" for="seasonSwitch">Sezon</label><select id="seasonSwitch" class="small-select">${[...data.seasons].reverse().map(x => `<option value="${esc(x.id)}" ${x.id === s?.id ? 'selected' : ''}>${esc(x.name)}</option>`).join('')}</select>` : ''}${accountButton()}</div></header>
   <div class="content">${loaded ? pageContent(s) : '<div class="empty">Yükleniyor…</div>'}<div class="footer-note">SJ Kelimelik · Bağımsız topluluk uygulaması, resmî okul hizmeti değildir</div></div></main></div>
-  <nav class="mobile-nav" aria-label="Mobil menü">${visibleNav().filter(x => x[0] !== 'players').map(x => navButton(x, true)).join('')}</nav><div id="modalHost"></div>`;
+  <nav class="mobile-nav" aria-label="Mobil menü">${visibleNav().filter(x => x[0] !== 'players').map(x => navButton(x, true, counts)).join('')}</nav><div id="modalHost"></div>`;
 }
 
 function pageContent(s) {
@@ -144,7 +156,7 @@ function accountNotice() {
 function matchCard(m, s) {
   const status = m.status === 'done' ? `${fmt(m.scoreA)} : ${fmt(m.scoreB)}` : m.status === 'pending' ? '<span class="badge gold">Onay</span>' : m.status === 'disputed' ? '<span class="badge red">İtiraz</span>' : `<span class="badge">${m.status === 'waiting' ? 'Bekleniyor' : 'Oynanacak'}</span>`;
   const mine = myPlayerId() && [m.a, m.b].includes(myPlayerId());
-  return `<button type="button" data-action="match" data-id="${esc(m.id)}" class="match-row ${mine ? 'mine' : ''}"><span class="indicator ${m.status === 'done' ? 'green' : m.status === 'pending' ? 'gold' : ''}"></span><span style="flex:1;min-width:0"><span class="title">${esc(nickname(m.a))} <span class="muted">vs</span> ${esc(nickname(m.b))}</span><span class="meta">${esc(phaseLabel(m, s))}</span></span><span class="match-right"><span class="result">${status}</span>${icon('chevron', 15)}</span></button>`;
+  return `<button type="button" data-action="match" data-id="${esc(m.id)}" class="match-row ${mine ? 'mine' : ''}"><span class="indicator ${m.status === 'done' ? 'green' : m.status === 'pending' ? 'gold' : ''}"></span><span style="flex:1;min-width:0"><span class="title">${esc(nickname(m.a))} <span class="muted">vs</span> ${esc(nickname(m.b))}</span><span class="meta">${s.id !== activeSeason()?.id ? esc(s.name) + ' · ' : ''}${esc(phaseLabel(m, s))}</span></span><span class="match-right"><span class="result">${status}</span>${icon('chevron', 15)}</span></button>`;
 }
 
 function userMatches(s, pid) {
@@ -252,14 +264,15 @@ function seasonsPage() {
 
 function adminPage(s) {
   const pending = data.profiles.filter(p => p.status === 'pending');
-  const issues = s ? s.matches.filter(m => ['pending', 'disputed'].includes(m.status)) : [];
+  const issues = data.seasons.flatMap(x => x.matches.filter(m => ['pending', 'disputed'].includes(m.status)).map(m => [m, x]))
+    .sort((a, b) => (a[0].status === 'disputed' ? 0 : 1) - (b[0].status === 'disputed' ? 0 : 1));
   const groupDone = s?.format === 'cup' && s.stage === 'groups' && s.matches.filter(m => m.phase === 'group').every(m => m.status === 'done');
   const members = data.profiles.filter(p => p.status === 'approved');
   return `${header('YÖNETİM', 'Yönetici paneli', 'Hesaplar, müsabakalar ve sonuç incelemeleri.', `<button class="btn" data-action="createSeason">${icon('plus', 16)} Yeni organizasyon</button>`)}
   <div class="layout-3 mb">${stat('ONAY BEKLEYEN', pending.length, 'Hesap başvurusu')}${stat('SONUÇ İŞLEMLERİ', issues.length, 'Onay veya itiraz')}${stat('TAMAMLANAN', s ? completedCount(s) : 0, 'Bu sezondaki maçlar')}</div>
   <div class="layout-2 mb"><div class="stack">
    <div class="card pad"><div class="section-title"><h2>Hesap başvuruları</h2><span class="badge">${pending.length} bekleyen</span></div>${pending.length ? pending.map(p => `<div class="season-item row-line"><div><strong>${esc(p.username)}</strong><div class="tiny muted">${p.real_name ? esc(p.real_name) + ' · ' : ''}${longDate(p.created_at)}</div></div><div class="actions"><button class="btn soft small" data-action="approveProfile" data-id="${esc(p.id)}">Onayla</button><button class="btn secondary small" data-action="rejectProfile" data-id="${esc(p.id)}">Reddet</button></div></div>`).join('') : '<div class="empty">Yeni başvuru bulunmuyor.</div>'}</div>
-   <div class="card pad"><div class="section-title"><h2>Sonuç onayları ve itirazlar</h2><span class="badge gold">${issues.length}</span></div><div class="match-list">${issues.length ? issues.map(m => matchCard(m, s)).join('') : '<div class="empty">İncelenecek maç bulunmuyor.</div>'}</div></div>
+   <div class="card pad"><div class="section-title"><h2>Sonuç onayları ve itirazlar</h2><span class="badge gold">${issues.length}</span></div><div class="match-list">${issues.length ? issues.map(([m, x]) => matchCard(m, x)).join('') : '<div class="empty">İncelenecek maç bulunmuyor.</div>'}</div></div>
    <div class="card pad"><div class="section-title"><h2>Üyeler</h2><span class="badge">${members.length}</span></div>${members.map(p => `<div class="season-item row-line"><div><strong>${esc(p.username)}</strong> ${p.is_admin ? '<span class="badge blue">Yönetici</span>' : ''}<div class="tiny muted">${p.real_name ? esc(p.real_name) : 'Gerçek ad girilmedi'}${p.player_id && player(p.player_id)?.username !== p.username ? ' · oyuncu: ' + esc(nickname(p.player_id)) : ''}</div></div><div class="actions">${p.id !== me.id ? `<button class="btn secondary small" data-action="toggleAdminRole" data-id="${esc(p.id)}">${p.is_admin ? 'Yöneticilikten çıkar' : 'Yönetici yap'}</button>` : ''}<button class="btn secondary small" data-action="resetPassword" data-id="${esc(p.id)}">Şifre sıfırla</button></div></div>`).join('')}</div>
   </div>
   <div class="stack"><div class="card pad"><h2 style="margin-top:0">Sezon işlemleri</h2>${s ? `<p class="muted">Aktif sezon: <b>${esc(s.name)}</b></p>` : ''}<div class="stack">${groupDone ? `<button class="btn block" data-action="createBracket">${icon('trophy', 16)} Eleme tablosunu oluşturun</button>` : ''}<button class="btn secondary block" data-action="addPlayer">${icon('plus', 16)} Hesapsız oyuncu ekleyin</button><button class="btn secondary block" data-action="exportData">JSON yedeğini dışa aktarın</button>${s ? `<button class="btn secondary block danger-text" data-action="deleteSeason" data-id="${esc(s.id)}">Bu sezonu silin</button>` : ''}</div></div>
@@ -480,6 +493,11 @@ async function start() {
     try { await refresh(); } catch (e) { notify(e.message); }
   });
   api.subscribe(() => { if (!busy) refresh().catch(console.error); });
+  setInterval(async () => {
+    if (!isAdmin() || busy || document.visibilityState !== 'visible') return;
+    try { if (await api.pendingProfileCount() !== data.profiles.filter(p => p.status === 'pending').length) await refresh(); }
+    catch (e) { console.error(e); }
+  }, 45000);
   document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && !busy) refresh().catch(console.error); });
 }
 

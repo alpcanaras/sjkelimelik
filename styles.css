@@ -174,3 +174,9 @@ body.busy .modal button[type=submit],body.busy [data-action=confirmMatch],body.b
  .topbar-right{grid-template-columns:minmax(0,1fr) auto}
  .account-name{max-width:96px}
 }
+
+/* In-site notifications: count of items waiting for this user. */
+.nav-badge{margin-left:auto;min-width:19px;height:19px;padding:0 5px;border-radius:10px;background:#e5484d;color:#fff;font-size:11px;font-weight:800;line-height:19px;text-align:center;box-shadow:0 0 0 2px var(--surface)}
+.nav .nav-badge{box-shadow:none}
+.mobile-nav button{position:relative}
+.mobile-nav .nav-badge{position:absolute;top:-2px;left:calc(50% + 4px);margin:0;min-width:17px;height:17px;line-height:17px;font-size:10px;padding:0 4px}

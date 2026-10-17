@@ -119,6 +119,9 @@ export async function loadAll({ member = false, admin = false } = {}) {
   };
 }
 export function subscribe() {}
+export async function pendingProfileCount() {
+  return Number((await as(uid, `select count(*) as n from public.profiles where status = 'pending'`))[0].n);
+}
 
 async function call(fn, args) {
   const keys = Object.keys(args);

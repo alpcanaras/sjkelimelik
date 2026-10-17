@@ -94,6 +94,13 @@ export async function loadAll({ member = false, admin = false } = {}) {
   };
 }
 
+/* Admins only (RLS hides other accounts): how many accounts wait for approval. */
+export async function pendingProfileCount() {
+  const { count, error } = await sb.from('profiles').select('id', { count: 'exact', head: true }).eq('status', 'pending');
+  if (error) throw friendly(error);
+  return count ?? 0;
+}
+
 /* Calls fn (debounced) whenever matches, seasons or players change, from any browser. */
 export function subscribe(fn) {
   if (!configured) return;
