@@ -1,0 +1,7 @@
+node_modules/
+.DS_Store
+# The school crest is served from Supabase Storage, not committed (see README).
+assets/*crest*
+# Original offline prototype (contains the embedded crest).
+prototype/
+.claude/

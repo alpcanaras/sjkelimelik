@@ -1,0 +1,13 @@
+{
+  "name": "sj-kelimelik",
+  "private": true,
+  "type": "module",
+  "description": "SJ Kelimelik league app: static front end + Supabase.",
+  "scripts": {
+    "test": "node --test tests/*.test.mjs",
+    "local": "node tests/ui/serve.mjs"
+  },
+  "devDependencies": {
+    "@electric-sql/pglite": "0.5.8"
+  }
+}

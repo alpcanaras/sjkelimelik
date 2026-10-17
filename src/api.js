@@ -1,0 +1,132 @@
+/* Data access: Supabase auth, table reads and the server-side action functions.
+   Maps database rows to the shapes src/engine.js works with. */
+import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/+esm';
+import config from '../config.js';
+import { usernameKey } from './engine.js';
+
+export const configured = Boolean(config.SUPABASE_URL && config.SUPABASE_ANON_KEY);
+const sb = configured ? createClient(config.SUPABASE_URL, config.SUPABASE_ANON_KEY) : null;
+const PAGE = 1000; // PostgREST returns at most 1000 rows per request
+
+const loginEmail = username => usernameKey(username.trim()) + '@' + config.AUTH_EMAIL_DOMAIN;
+
+const AUTH_MESSAGES = [
+  [/invalid login credentials/i, 'Kullanıcı adı veya şifre hatalı.'],
+  [/already registered|already exists|duplicate/i, 'Bu kullanıcı adı alınmış.'],
+  [/password should be at least/i, 'Şifre çok kısa.'],
+  [/rate limit|too many/i, 'Çok fazla deneme yapıldı. Biraz sonra tekrar deneyin.'],
+  [/email not confirmed/i, 'Supabase ayarlarında "Confirm email" seçeneği kapatılmalı.'],
+  [/database error saving new user/i, 'Hesap oluşturulamadı. Kullanıcı adını kontrol edin.'],
+  [/failed to fetch|network/i, 'Sunucuya ulaşılamadı. İnternet bağlantınızı kontrol edin.']
+];
+function friendly(error) {
+  const msg = error?.message || String(error);
+  for (const [re, text] of AUTH_MESSAGES) if (re.test(msg)) return new Error(text);
+  return new Error(msg);
+}
+const unwrap = ({ data, error }) => { if (error) throw friendly(error); return data; };
+
+// ------------------------------------------------------------------ auth
+export async function getSession() {
+  return configured ? unwrap(await sb.auth.getSession()).session : null;
+}
+// supabase-js runs these callbacks while holding its auth lock, so calling the client from
+// inside one can deadlock. Hand the session over on the next tick instead.
+export function onAuthChange(fn) {
+  if (configured) sb.auth.onAuthStateChange((_event, session) => { setTimeout(() => fn(session), 0); });
+}
+export async function signIn(username, password) {
+  return unwrap(await sb.auth.signInWithPassword({ email: loginEmail(username), password })).session;
+}
+export async function signUp(username, password, realName) {
+  const data = unwrap(await sb.auth.signUp({
+    email: loginEmail(username), password,
+    options: { data: { username: username.trim(), real_name: realName?.trim() || null } }
+  }));
+  if (!data.session) throw new Error('Hesap oluşturuldu ancak giriş açılmadı: Supabase\'de "Confirm email" kapatılmalı.');
+  return data.session;
+}
+export async function signOut() { unwrap(await sb.auth.signOut()); }
+
+export async function myProfile(userId) {
+  return unwrap(await sb.from('profiles').select('*').eq('id', userId).maybeSingle());
+}
+
+// ------------------------------------------------------------------ reads
+async function selectAll(table, columns, order = 'id') {
+  const rows = [];
+  for (let from = 0; ; from += PAGE) {
+    const page = unwrap(await sb.from(table).select(columns).order(order).range(from, from + PAGE - 1));
+    rows.push(...page);
+    if (page.length < PAGE) return rows;
+  }
+}
+
+const toMatch = r => ({
+  id: r.id, seasonId: r.season_id, a: r.player_a, b: r.player_b, round: r.round, leg: r.leg, slot: r.slot,
+  phase: r.phase, groupId: r.group_id, status: r.status, scoreA: r.score_a, scoreB: r.score_b,
+  pendingScore: r.pending_a == null ? null : { a: r.pending_a, b: r.pending_b }, pendingBy: r.pending_by,
+  finalizedAt: r.finalized_at ? Date.parse(r.finalized_at) : null
+});
+
+/* Everything public, plus member/admin-only extras when the session allows them (RLS filters the rest). */
+export async function loadAll({ member = false, admin = false } = {}) {
+  const [players, seasons, matches, names, profiles, audits] = await Promise.all([
+    selectAll('players', 'id, username, created_at'),
+    selectAll('seasons', '*', 'created_at'),
+    selectAll('matches', '*'),
+    member ? selectAll('player_private', 'player_id, real_name', 'player_id') : [],
+    admin ? selectAll('profiles', 'id, username, username_key, real_name, status, is_admin, player_id, created_at', 'created_at') : [],
+    admin ? unwrap(await sb.from('audit_log').select('*').order('id', { ascending: false }).limit(60)) : []
+  ]);
+  const realName = new Map(names.map(n => [n.player_id, n.real_name]));
+  const bySeason = new Map(seasons.map(s => [s.id, []]));
+  for (const m of matches) bySeason.get(m.season_id)?.push(toMatch(m));
+  return {
+    players: players.map(p => ({ id: p.id, username: p.username, realName: realName.get(p.id) || null })),
+    seasons: seasons.map(s => ({
+      id: s.id, name: s.name, format: s.format, status: s.status, stage: s.stage, legs: s.legs,
+      seedStrategy: s.seed_strategy, players: s.player_ids, groups: s.groups || [], bracket: s.bracket,
+      createdAt: s.created_at,
+      matches: (bySeason.get(s.id) || []).sort((x, y) => x.phase.localeCompare(y.phase) || x.round - y.round || (x.slot ?? 0) - (y.slot ?? 0))
+    })),
+    profiles, audits
+  };
+}
+
+/* Calls fn (debounced) whenever matches, seasons or players change, from any browser. */
+export function subscribe(fn) {
+  if (!configured) return;
+  let timer;
+  const ping = () => { clearTimeout(timer); timer = setTimeout(fn, 400); };
+  sb.channel('league')
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'matches' }, ping)
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'seasons' }, ping)
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'players' }, ping)
+    .subscribe();
+}
+
+// ------------------------------------------------------------------ actions (checked on the server)
+const call = async (fn, args) => unwrap(await sb.rpc(fn, args));
+
+export const submitScore = (id, a, b) => call('submit_score', { p_match: id, p_a: a, p_b: b });
+export const respondScore = (id, accept) => call('respond_score', { p_match: id, p_accept: accept });
+export const updateMyProfile = realName => call('update_my_profile', { p_real_name: realName });
+
+export const adminSetScore = (id, a, b) => call('admin_set_score', { p_match: id, p_a: a, p_b: b });
+export const adminResetMatch = id => call('admin_reset_match', { p_match: id });
+export const adminCreateSeason = ({ name, format, legs, strategy, ids, plan }) => call('admin_create_season', {
+  p: {
+    name, format, legs, seed_strategy: format === 'cup' ? strategy : null, player_ids: ids, groups: plan.groups,
+    matches: plan.matches.map(m => ({ phase: m.phase, group_id: m.groupId, round: m.round, leg: m.leg, slot: m.slot, a: m.a, b: m.b }))
+  }
+});
+export const adminCreateKnockout = (seasonId, plan) => call('admin_create_knockout', { p_season: seasonId, p: plan });
+export const adminDeleteSeason = id => call('admin_delete_season', { p_season: id });
+export const approveProfile = (id, playerId = null) => call('approve_profile', { p_profile: id, p_player: playerId });
+export const rejectProfile = id => call('reject_profile', { p_profile: id });
+export const adminAddPlayer = (username, realName) => call('admin_add_player', { p_username: username, p_real_name: realName || null });
+export const adminSetAdmin = (id, value) => call('admin_set_admin', { p_profile: id, p_value: value });
+export const adminResetPassword = (id, password) => call('admin_reset_password', { p_profile: id, p_password: password });
+
+export const crestUrl = config.CREST_URL || (configured ? config.SUPABASE_URL.replace(/\/$/, '') + '/storage/v1/object/public/branding/crest.png' : '');
