@@ -6,3 +6,4 @@ assets/*crest*
 prototype/
 .claude/
 supabase-setup-once.sql
+dist/
