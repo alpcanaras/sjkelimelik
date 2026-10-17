@@ -1,8 +1,8 @@
 // Fill these in after creating the Supabase project (Project Settings → API).
 // The anon/publishable key is meant to be public: the database rules (RLS + functions) are what protect the data.
 export default {
-  SUPABASE_URL: '',
-  SUPABASE_ANON_KEY: '',
+  SUPABASE_URL: 'https://jbfjdpxbfpcycxctvaaw.supabase.co',
+  SUPABASE_ANON_KEY: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImpiZmpkcHhiZnBjeWN4Y3R2YWF3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTIyNDU0MjYsImV4cCI6MjEwNzgyMTQyNn0.LfIvJsZIUJeWGmcEdpcPjFDhjnSEL1FEDcnqdba8zs0',
 
   // Leave empty to use the crest uploaded to Supabase Storage as branding/crest.png
   // (it is not stored in the public repository). Any other image URL works too.
