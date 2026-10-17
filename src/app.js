@@ -9,7 +9,7 @@ const SEASON_KEY = 'sj-kelimelik-season';
 
 let data = { players: [], seasons: [], profiles: [], audits: [] };
 let session = null, me = null, loaded = false, busy = false, eloCache = null;
-let view = 'home', fixtureFilter = null, fixtureRound = 'all';
+let view = 'home', fixtureFilter = null, fixtureRound = 'all', membersOpen = false;
 let activeSeasonId = (() => { try { return localStorage.getItem(SEASON_KEY); } catch (e) { return null; } })();
 
 // ------------------------------------------------------------------ small helpers
@@ -273,7 +273,7 @@ function adminPage(s) {
   <div class="layout-2 mb"><div class="stack">
    <div class="card pad"><div class="section-title"><h2>Hesap başvuruları</h2><span class="badge">${pending.length} bekleyen</span></div>${pending.length ? pending.map(p => `<div class="season-item row-line"><div><strong>${esc(p.username)}</strong><div class="tiny muted">${p.real_name ? esc(p.real_name) + ' · ' : ''}${longDate(p.created_at)}</div></div><div class="actions"><button class="btn soft small" data-action="approveProfile" data-id="${esc(p.id)}">Onayla</button><button class="btn secondary small" data-action="rejectProfile" data-id="${esc(p.id)}">Reddet</button></div></div>`).join('') : '<div class="empty">Yeni başvuru bulunmuyor.</div>'}</div>
    <div class="card pad"><div class="section-title"><h2>Sonuç onayları ve itirazlar</h2><span class="badge gold">${issues.length}</span></div><div class="match-list">${issues.length ? issues.map(([m, x]) => matchCard(m, x)).join('') : '<div class="empty">İncelenecek maç bulunmuyor.</div>'}</div></div>
-   <div class="card pad"><div class="section-title"><h2>Üyeler</h2><span class="badge">${members.length}</span></div>${members.map(p => `<div class="season-item row-line"><div><strong>${esc(p.username)}</strong> ${p.is_admin ? '<span class="badge blue">Yönetici</span>' : ''}<div class="tiny muted">${p.real_name ? esc(p.real_name) : 'Gerçek ad girilmedi'}${p.player_id && player(p.player_id)?.username !== p.username ? ' · oyuncu: ' + esc(nickname(p.player_id)) : ''}</div></div><div class="actions">${p.id !== me.id ? `<button class="btn secondary small" data-action="toggleAdminRole" data-id="${esc(p.id)}">${p.is_admin ? 'Yöneticilikten çıkar' : 'Yönetici yap'}</button>` : ''}<button class="btn secondary small" data-action="resetPassword" data-id="${esc(p.id)}">Şifre sıfırla</button></div></div>`).join('')}</div>
+   <div class="card pad"><div class="section-title"><h2>Üyeler</h2><span class="actions"><span class="badge">${members.length}</span><button class="btn secondary small" data-action="toggleMembers" aria-expanded="${membersOpen}">${membersOpen ? 'Gizle' : 'Göster'}</button></span></div>${membersOpen ? members.map(p => `<div class="season-item row-line"><div><strong>${esc(p.username)}</strong> ${p.is_admin ? '<span class="badge blue">Yönetici</span>' : ''}<div class="tiny muted">${p.real_name ? esc(p.real_name) : 'Gerçek ad girilmedi'}</div></div><button class="btn secondary small" data-action="manageMember" data-id="${esc(p.id)}">Yönet</button></div>`).join('') : '<p class="muted tiny mb0">Yetki ve şifre işlemleri için listeyi açıp bir üyeyi seçin.</p>'}</div>
   </div>
   <div class="stack"><div class="card pad"><h2 style="margin-top:0">Sezon işlemleri</h2>${s ? `<p class="muted">Aktif sezon: <b>${esc(s.name)}</b></p>` : ''}<div class="stack">${groupDone ? `<button class="btn block" data-action="createBracket">${icon('trophy', 16)} Eleme tablosunu oluşturun</button>` : ''}<button class="btn secondary block" data-action="addPlayer">${icon('plus', 16)} Hesapsız oyuncu ekleyin</button><button class="btn secondary block" data-action="exportData">JSON yedeğini dışa aktarın</button>${s ? `<button class="btn secondary block danger-text" data-action="deleteSeason" data-id="${esc(s.id)}">Bu sezonu silin</button>` : ''}</div></div>
   <div class="card pad"><div class="section-title"><h2>Son işlemler</h2>${icon('archive', 17)}</div>${data.audits.length ? data.audits.slice(0, 12).map(a => `<div class="audit"><div class="audit-label">${esc(a.action)}</div><div class="muted">${esc(a.actor_name || 'Sistem')} · ${longDate(a.at)}</div></div>`).join('') : '<div class="empty">Henüz işlem yok.</div>'}</div></div></div>`;
@@ -349,6 +349,14 @@ function openApprove(id) {
   <form id="approveForm"><input type="hidden" name="profile" value="${esc(p.id)}"><div class="field"><label for="apLink">Oyuncu profili</label><select class="select" id="apLink" name="player"><option value="">Yeni oyuncu oluştur (${esc(p.username)})</option>${free.map(x => `<option value="${esc(x.id)}" ${x === same ? 'selected' : ''}>Mevcut oyuncuya bağla: ${esc(x.username)}</option>`).join('')}</select><small>Bu kişi daha önce hesapsız oyuncu olarak eklendiyse, maç geçmişini korumak için o oyuncuya bağlayın.</small></div>${formActions('Onaylayın')}</form>`);
 }
 
+function openMember(id) {
+  const p = data.profiles.find(x => x.id === id); if (!p) return;
+  const pl = p.player_id && player(p.player_id), self = p.id === me.id;
+  modal(`${modalHeader(esc(p.username), p.is_admin ? '<span class="badge blue">Yönetici</span>' : 'Üye')}
+  <div class="detail-summary"><div class="flex between"><span class="muted">Gerçek ad</span><b>${esc(p.real_name || '—')}</b></div><div class="flex between mt"><span class="muted">Oyuncu profili</span><b>${pl ? esc(pl.username) : '—'}</b></div><div class="flex between mt"><span class="muted">Katılım</span><b>${longDate(p.created_at)}</b></div></div>
+  <div class="stack">${pl ? `<button class="btn secondary block" data-action="profile" data-id="${esc(pl.id)}">${icon('user', 15)} Oyuncu profilini görüntüleyin</button>` : ''}${self ? '' : `<button class="btn secondary block" data-action="toggleAdminRole" data-id="${esc(p.id)}">${icon('shield', 15)} ${p.is_admin ? 'Yöneticilikten çıkarın' : 'Yönetici yapın'}</button>`}<button class="btn secondary block" data-action="resetPassword" data-id="${esc(p.id)}">${icon('lock', 15)} Şifre sıfırlayın</button></div>`);
+}
+
 function openResetPassword(id) {
   const p = data.profiles.find(x => x.id === id); if (!p) return;
   const suggestion = Array.from(crypto.getRandomValues(new Uint32Array(10)), n => 'abcdefghjkmnpqrstuvwxyz23456789'[n % 31]).join('');
@@ -392,6 +400,8 @@ function action(name, id) {
     case 'rejectProfile': return confirm('Bu hesap reddedilsin mi?') && run(() => api.rejectProfile(id), 'Hesap reddedildi.');
     case 'toggleAdminRole': { const p = data.profiles.find(x => x.id === id); return p && confirm(p.is_admin ? `${p.username} yöneticilikten çıkarılsın mı?` : `${p.username} yönetici yapılsın mı? Tüm yönetici işlemlerini yapabilecek.`) && run(() => api.adminSetAdmin(id, !p.is_admin), 'Yetki güncellendi.'); }
     case 'resetPassword': return openResetPassword(id);
+    case 'manageMember': return openMember(id);
+    case 'toggleMembers': membersOpen = !membersOpen; return render();
     case 'toggleRoster': { const checks = $$('input[name="players"]', $('#roster')); const all = checks.every(x => x.checked); checks.forEach(x => { x.checked = !all; }); return; }
     case 'createBracket': {
       const s = activeSeason();
