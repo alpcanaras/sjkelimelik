@@ -1,0 +1,7 @@
+# Upload only what the site needs (the crest and the prototype never leave this machine).
+/*
+!index.html
+!styles.css
+!config.js
+!src
+!vercel.json

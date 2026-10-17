@@ -7,3 +7,5 @@ prototype/
 .claude/
 supabase-setup-once.sql
 dist/
+.vercel/
+.env*

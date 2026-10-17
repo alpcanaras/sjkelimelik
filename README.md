@@ -29,7 +29,9 @@ An independent community app. It is not an official school service.
 3. **Turn off email confirmation.** Go to **Authentication → Sign In / Providers → Email**, keep Email enabled, and switch **Confirm email** off. Without this, sign-ups fail, because there is no real inbox to confirm.
 4. **Fill in `config.js`.** Copy the **Project URL** and the **anon / publishable key** from **Project Settings → API**. This key is designed to be public.
 5. **Upload the crest.** Go to **Storage → branding** (the migration creates this bucket) and upload the crest image named exactly `crest.png`.
-6. **Deploy.** Push to GitHub, then under **Settings → Pages** choose *Deploy from a branch*, `main`, folder `/ (root)`. The site appears at `https://<user>.github.io/<repo>/`.
+6. **Deploy.**
+   - **Vercel (current live site):** https://sjkelimelik.vercel.app. Redeploy after changes with `vercel deploy --prod`. `vercel.json` and `.vercelignore` make sure only the site files are uploaded and published.
+   - **GitHub Pages (also on):** under **Settings → Pages** choose *Deploy from a branch*, `main`, folder `/ (root)`. The site appears at `https://<user>.github.io/<repo>/`.
 7. **Make yourself admin.** Open the site, create your account, then run this in the SQL Editor:
    ```sql
    select private.make_admin('your_username');
