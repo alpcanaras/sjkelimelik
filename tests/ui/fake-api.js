@@ -3,7 +3,7 @@
    Served in place of src/api.js by tests/ui/serve.mjs. Data persists in IndexedDB; ?reset clears it. */
 import { PGlite } from '/node_modules/@electric-sql/pglite/dist/index.js';
 import { pgcrypto } from '/node_modules/@electric-sql/pglite/dist/contrib/pgcrypto.js';
-import { usernameKey, planSeason } from './engine.js';
+import { usernameKey, loginLocal, planSeason } from './engine.js';
 
 const DOMAIN = 'kullanici.sjkelimelik.invalid';
 const SESSION_KEY = 'fake-session';
@@ -40,7 +40,7 @@ async function createUser(username, password, realName) {
   const { rows } = await db.query(
     `insert into auth.users (email, encrypted_password, raw_user_meta_data)
      values ($1, extensions.crypt($2, extensions.gen_salt('bf')), $3) returning id`,
-    [usernameKey(username) + '@' + DOMAIN, password, { username, real_name: realName || null }]);
+    [loginLocal(usernameKey(username)) + '@' + DOMAIN, password, { username, real_name: realName || null }]);
   return rows[0].id;
 }
 
@@ -76,7 +76,7 @@ function setSession(id) { uid = id; id ? localStorage.setItem(SESSION_KEY, id) :
 export async function signIn(username, password) {
   await ready;
   const row = (await db.query(`select id from auth.users where email = $1 and encrypted_password = extensions.crypt($2, encrypted_password)`,
-    [usernameKey(username.trim()) + '@' + DOMAIN, password])).rows[0];
+    [loginLocal(usernameKey(username.trim())) + '@' + DOMAIN, password])).rows[0];
   if (!row) throw new Error('Kullanıcı adı veya şifre hatalı.');
   return setSession(row.id);
 }

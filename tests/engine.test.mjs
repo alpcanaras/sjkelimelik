@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { createFixtures, planSeason, planKnockout, ratings, rankings, groupSizes, usernameKey, validUsername } from '../src/engine.js';
+import { createFixtures, planSeason, planKnockout, ratings, rankings, groupSizes, usernameKey, validUsername, loginLocal } from '../src/engine.js';
 
 const ids = n => Array.from({ length: n }, (_, i) => 'p' + (i + 1));
 let seq = 0;
@@ -94,6 +94,9 @@ test('standings use 3/1/0 then differential; Elo is zero-sum from 1000', () => {
 test('username rules match the SQL rules', () => {
   assert.equal(usernameKey('Şule_İpek'), 'sule_ipek');
   assert.equal(usernameKey('ÇĞÖÜığ'), 'cgouig');
-  for (const ok of ['alp', 'Ayşe', 'kelime.ustasi', 'oyuncu_42']) assert.ok(validUsername(ok), ok);
-  for (const bad of ['al', 'a b c', '.alp', 'alp.', 'a..b', 'x'.repeat(21), 'alp@x']) assert.ok(!validUsername(bad), bad);
+  for (const ok of ['alp', 'Ayşe', 'kelime.ustasi', 'oyuncu_42', 'Kelime!', '@lp', 'a-b', 'neden?', '.alp.']) assert.ok(validUsername(ok), ok);
+  for (const bad of ['al', 'a b c', 'x'.repeat(21), '!!!', 'tab\tname', 'emoji😀x']) assert.ok(!validUsername(bad), bad);
+  assert.equal(loginLocal('kungfu_manda'), 'kungfu_manda');
+  assert.equal(loginLocal('kelime!'), 'h-6b656c696d6521');
+  assert.ok(loginLocal('x'.repeat(20) + '').length <= 64 && loginLocal('!'.repeat(19) + 'a').length <= 64, 'always a valid email length');
 });

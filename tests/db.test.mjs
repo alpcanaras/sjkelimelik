@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import { readFileSync, readdirSync } from 'node:fs';
 import { PGlite } from '@electric-sql/pglite';
 import { pgcrypto } from '@electric-sql/pglite/contrib/pgcrypto';
-import { planSeason, planKnockout, usernameKey } from '../src/engine.js';
+import { planSeason, planKnockout, usernameKey, loginLocal } from '../src/engine.js';
 
 const DOMAIN = 'kullanici.sjkelimelik.invalid';
 const root = new URL('../', import.meta.url);
@@ -39,7 +39,7 @@ async function signup(username, realName = null) {
   const { rows } = await db.query(
     `insert into auth.users (email, encrypted_password, raw_user_meta_data)
      values ($1, extensions.crypt('secret123', extensions.gen_salt('bf')), $2) returning id`,
-    [usernameKey(username) + '@' + DOMAIN, { username, real_name: realName }]);
+    [loginLocal(usernameKey(username)) + '@' + DOMAIN, { username, real_name: realName }]);
   return rows[0].id;
 }
 
@@ -71,6 +71,22 @@ test('signup trigger creates pending profiles and rejects mismatched usernames',
   await assert.rejects(db.query(`insert into auth.users (email, raw_user_meta_data) values ('bob@${DOMAIN}', '{"username":"alice"}')`), /uyuşmuyor/);
   await assert.rejects(db.query(`insert into auth.users (email, raw_user_meta_data) values ('x@${DOMAIN}', '{"username":"x"}')`), /Geçersiz/);
   await assert.rejects(signup('ayse'), /duplicate|unique/i, 'Turkish letters fold, so ayse = Ayşe');
+});
+
+test('usernames with symbols sign up through the encoded login key; plain names keep theirs', async () => {
+  for (const name of ['Kelime!', '@lp_42', 'ali-veli', 'Şeker?', '.nokta.']) {
+    const id = await signup(name);
+    const email = (await db.query('select email from auth.users where id=$1', [id])).rows[0].email;
+    assert.ok(email.startsWith('h-'), name + ' -> ' + email);
+    const sqlLocal = (await db.query('select public.login_local(public.username_key($1)) as l', [name])).rows[0].l;
+    assert.equal(sqlLocal, email.split('@')[0], 'SQL and JS encodings agree for ' + name);
+  }
+  assert.equal(loginLocal(usernameKey('Ayşe')), 'ayse', 'existing-style names are unchanged');
+  assert.equal((await db.query(`select public.login_local('kelime.ustasi') as l`)).rows[0].l, 'kelime.ustasi');
+  await assert.rejects(signup('iki kelime'), /Geçersiz/);
+  await assert.rejects(signup('!!!'), /Geçersiz/);
+  await assert.rejects(signup('kelime!'), /duplicate|unique/i, 'case-insensitive with symbols too');
+  await db.query(`delete from auth.users where email like 'h-%'`);
 });
 
 test('bootstrap admin is approved, linked to a player and an admin', async () => {

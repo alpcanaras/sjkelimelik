@@ -162,7 +162,13 @@ export const knockoutLabel = (round, size) => {
    The same rule lives in SQL (public.username_key / public.valid_username). */
 const FOLD = { 'Ç': 'C', 'Ğ': 'G', 'İ': 'I', 'Ö': 'O', 'Ş': 'S', 'Ü': 'U', 'ç': 'c', 'ğ': 'g', 'ı': 'i', 'ö': 'o', 'ş': 's', 'ü': 'u' };
 export const usernameKey = name => String(name).replace(/[ÇĞİÖŞÜçğıöşü]/g, ch => FOLD[ch]).toLowerCase();
-export const USERNAME_RULE = '3-20 karakter; harf, rakam, alt çizgi (_) ve nokta (.) kullanılabilir.';
+export const USERNAME_RULE = '3-20 karakter, boşluksuz; harf, rakam ve ! ? . _ - gibi işaretler kullanılabilir.';
 export function validUsername(name) {
-  return /^[A-Za-z0-9ÇĞİÖŞÜçğıöşü_.]{3,20}$/.test(name) && !/^\.|\.$|\.\./.test(name);
+  return /^[!-~ÇĞİÖŞÜçğıöşü]{3,20}$/.test(name) && /[A-Za-z0-9ÇĞİÖŞÜçğıöşü]/.test(name);
+}
+/* Email local part for a username key (public.login_local in SQL). Plain keys stay as they are;
+   keys with symbols are hex-encoded behind "h-" so they are always a valid email address. */
+export function loginLocal(key) {
+  if (/^[a-z0-9_]+(\.[a-z0-9_]+)*$/.test(key)) return key;
+  return 'h-' + [...new TextEncoder().encode(key)].map(b => b.toString(16).padStart(2, '0')).join('');
 }

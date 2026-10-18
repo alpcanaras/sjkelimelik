@@ -2,13 +2,13 @@
    Maps database rows to the shapes src/engine.js works with. */
 import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/+esm';
 import config from '../config.js';
-import { usernameKey } from './engine.js';
+import { usernameKey, loginLocal } from './engine.js';
 
 export const configured = Boolean(config.SUPABASE_URL && config.SUPABASE_ANON_KEY);
 const sb = configured ? createClient(config.SUPABASE_URL, config.SUPABASE_ANON_KEY) : null;
 const PAGE = 1000; // PostgREST returns at most 1000 rows per request
 
-const loginEmail = username => usernameKey(username.trim()) + '@' + config.AUTH_EMAIL_DOMAIN;
+const loginEmail = username => loginLocal(usernameKey(username.trim())) + '@' + config.AUTH_EMAIL_DOMAIN;
 
 const AUTH_MESSAGES = [
   [/invalid login credentials/i, 'Kullanıcı adı veya şifre hatalı.'],
