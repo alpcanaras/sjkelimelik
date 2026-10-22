@@ -9,7 +9,7 @@ const SEASON_KEY = 'sj-kelimelik-season';
 
 let data = { players: [], seasons: [], profiles: [], audits: [] };
 let session = null, me = null, loaded = false, busy = false, eloCache = null;
-let view = 'home', fixtureFilter = null, fixtureRound = 'all', membersOpen = false;
+let view = 'home', fixtureFilter = null, fixturePlayer = 'all', membersOpen = false;
 let activeSeasonId = (() => { try { return localStorage.getItem(SEASON_KEY); } catch (e) { return null; } })();
 
 // ------------------------------------------------------------------ small helpers
@@ -66,7 +66,17 @@ function notify(message) { const t = $('#toast'); if (!t) return; t.textContent 
 
 const stateName = s => ({ scheduled: 'Oynanacak', pending: 'Onay bekliyor', disputed: 'İtiraz edildi', done: 'Tamamlandı', waiting: 'Eşleşme bekleniyor' })[s] || s;
 const statusBadge = s => `<span class="badge ${s === 'done' ? 'green' : s === 'pending' ? 'gold' : s === 'disputed' ? 'red' : ''}">${esc(stateName(s))}</span>`;
-const phaseLabel = (m, s) => m.phase === 'group' ? (s.groups.find(g => g.id === m.groupId)?.name || 'Grup') + (m.round ? ` · ${m.round}. tur` : '') : m.phase === 'knockout' ? knockoutLabel(m.round, s.bracket?.size) : m.round + '. hafta';
+/* Kelimelik games run in parallel, so there are no game weeks: league matches are labelled by meeting
+   (first match / rematch), group matches by group. Only knockout rounds are sequential. */
+const phaseLabel = (m, s) => m.phase === 'group' ? (s.groups.find(g => g.id === m.groupId)?.name || 'Grup')
+  : m.phase === 'knockout' ? knockoutLabel(m.round, s.bracket?.size)
+  : s.legs === 2 ? (m.leg === 2 ? 'Rövanş' : 'İlk maç') : 'Lig maçı';
+const opponentOf = (m, pid) => (m.a === pid ? m.b : m.a);
+/* Order for open games: knockout rounds in order, first meetings before rematches, then by name. */
+const playOrder = pid => (x, y) =>
+  (x.phase === 'knockout' ? x.round : -1) - (y.phase === 'knockout' ? y.round : -1) || (x.leg || 1) - (y.leg || 1)
+  || (pid ? nickname(opponentOf(x, pid)).localeCompare(nickname(opponentOf(y, pid)), 'tr')
+          : (nickname(x.a) + nickname(x.b)).localeCompare(nickname(y.a) + nickname(y.b), 'tr'));
 
 // ------------------------------------------------------------------ data loading
 async function refresh() {
@@ -161,7 +171,7 @@ function matchCard(m, s) {
 
 function userMatches(s, pid) {
   const prio = m => m.status === 'pending' && m.pendingBy !== pid ? 0 : m.status === 'scheduled' ? 1 : m.status === 'pending' ? 2 : m.status === 'disputed' ? 3 : m.status === 'waiting' ? 4 : 5;
-  return s.matches.filter(m => m.a === pid || m.b === pid).sort((a, b) => prio(a) - prio(b) || a.round - b.round);
+  return s.matches.filter(m => m.a === pid || m.b === pid).sort((a, b) => prio(a) - prio(b) || playOrder(pid)(a, b));
 }
 
 function seasonStanding(s, pid) {
@@ -193,12 +203,17 @@ function homePage(s) {
     <div class="card pad"><div class="section-title"><h2>Elo liderleri</h2><button class="linkbtn" data-nav="players">Oyuncular ${icon('right', 13)}</button></div>${top.map((id, i) => `<div class="flex between audit clickable" data-action="profile" data-id="${esc(id)}"><span><span class="rank muted">${i + 1}.</span> <b>${esc(nickname(id))}</b></span><b>${integerRating(id)}</b></div>`).join('')}</div></div></div>`;
   }
 
-  const list = userMatches(s, pid), outstanding = list.filter(m => m.status !== 'done'), primary = outstanding[0], more = outstanding.slice(1, 4);
-  const rank = standing.findIndex(x => x.id === pid) + 1, ownDone = list.filter(m => m.status === 'done').length;
-  const hero = primary ? `<div class="card hero"><div class="hero-header"><span class="kicker">${primary.status === 'pending' && primary.pendingBy !== pid ? 'Onayınızı bekleyen maç' : 'Sıradaki maçınız'}</span><span class="badge dark">${esc(phaseLabel(primary, s))}</span></div><div class="hero-vs"><div class="competitor"><small>${primary.a === pid ? 'SİZ' : 'RAKİBİNİZ'}</small>${esc(nickname(primary.a))}</div><span class="vs">vs</span><div class="competitor" style="text-align:right"><small>${primary.b === pid ? 'SİZ' : 'RAKİBİNİZ'}</small>${esc(nickname(primary.b))}</div></div><div class="hero-foot"><span class="hero-meta">${primary.status === 'pending' ? 'Sonuç onayı bekleniyor' : primary.status === 'disputed' ? 'Yönetici incelemesi gerekiyor' : primary.status === 'waiting' ? 'Rakip henüz belli değil' : 'Sonucu siz veya rakibiniz girebilirsiniz'}</span><button class="btn" data-action="match" data-id="${esc(primary.id)}">${primary.status === 'pending' ? 'Sonucu inceleyin' : 'Maçı görüntüleyin'} ${icon('right', 16)}</button></div></div>`
-    : `<div class="card hero"><div class="kicker">Maç takviminiz</div><h2>Şimdilik oynanacak maçınız yok.</h2><p>Tamamladığınız maçları fikstürden inceleyebilirsiniz.</p></div>`;
+  const list = userMatches(s, pid), ownDone = list.filter(m => m.status === 'done').length;
+  const toConfirm = list.filter(m => m.status === 'pending' && m.pendingBy !== pid);
+  const open = list.filter(m => m.status === 'scheduled');
+  const upcoming = list.filter(m => m.status !== 'done' && !toConfirm.includes(m));
+  const rank = standing.findIndex(x => x.id === pid) + 1, primary = toConfirm[0];
+  const hero = primary
+    ? `<div class="card hero"><div class="hero-header"><span class="kicker">Onayınızı bekleyen maç${toConfirm.length > 1 ? ` · ${toConfirm.length} adet` : ''}</span><span class="badge dark">${esc(phaseLabel(primary, s))}</span></div><div class="hero-vs"><div class="competitor"><small>${primary.a === pid ? 'SİZ' : 'RAKİBİNİZ'}</small>${esc(nickname(primary.a))}</div><span class="vs">vs</span><div class="competitor" style="text-align:right"><small>${primary.b === pid ? 'SİZ' : 'RAKİBİNİZ'}</small>${esc(nickname(primary.b))}</div></div><div class="hero-foot"><span class="hero-meta">Rakibiniz ${primary.pendingScore?.a} : ${primary.pendingScore?.b} sonucunu girdi</span><button class="btn" data-action="match" data-id="${esc(primary.id)}">Sonucu inceleyin ${icon('right', 16)}</button></div></div>`
+    : `<div class="card hero"><div class="kicker">SIRADAKİ OYUNLARINIZ</div><h2>${open.length ? `${fmt(open.length)} maçınız oynanmayı bekliyor` : 'Şimdilik oynanacak maçınız yok.'}</h2><p class="hero-meta">${open.length ? 'Sıra yok: maçlarınızı istediğiniz sırayla oynayın, biten maçın sonucunu girin.' : 'Tamamladığınız maçları fikstürden inceleyebilirsiniz.'}</p>${open.length ? `<div class="hero-foot"><span class="hero-meta">${fmt(ownDone)} / ${fmt(list.length)} maç tamamlandı</span><button class="btn" data-action="myMatches">Maçlarım ${icon('right', 16)}</button></div>` : ''}</div>`;
+  const upcomingCard = `<div class="card pad"><div class="section-title"><h2>Sıradaki oyunlarınız</h2><button class="linkbtn" data-action="myMatches">Tümü${upcoming.length ? ` (${upcoming.length})` : ''} ${icon('right', 13)}</button></div><div class="match-list">${upcoming.length ? upcoming.slice(0, 8).map(m => matchCard(m, s)).join('') : '<div class="empty">Başka maç bulunmuyor.</div>'}</div></div>`;
   return `${header('GENEL BAKIŞ', 'Hoş geldiniz, ' + esc(me.username) + '!', 'Sezonla ilgili gelişmeleri buradan takip edebilirsiniz.', pill)}${championCard}
-  <div class="layout-2 mb"><div class="stack">${hero}<div class="card pad"><div class="section-title"><h2>Yaklaşan maçlarınız</h2><button class="linkbtn" data-nav="fixtures">Tüm fikstür ${icon('right', 13)}</button></div><div class="match-list">${more.length ? more.map(m => matchCard(m, s)).join('') : '<div class="empty">Başka maç bulunmuyor.</div>'}</div></div>${recentCard}</div>
+  <div class="layout-2 mb"><div class="stack">${hero}${upcomingCard}${recentCard}</div>
   <div class="stack"><div class="layout-3">${stat('ELO PUANINIZ', fmt(integerRating(pid)), 'Başlangıç: 1000')}${stat('SIRALAMANIZ', rank ? '#' + rank : '−', s.format === 'cup' ? 'Grup sırası' : 'Lig sırası')}${stat('MAÇLARINIZ', fmt(ownDone), fmt(list.length) + ' toplam')}</div>${tableCard}</div></div>`;
 }
 
@@ -215,14 +230,21 @@ function fixturesPage(s) {
   if (filter === 'mine') matches = matches.filter(m => m.a === pid || m.b === pid);
   else if (filter === 'pending') matches = matches.filter(m => ['pending', 'disputed'].includes(m.status));
   else if (filter === 'done') matches = matches.filter(m => m.status === 'done');
-  if (fixtureRound !== 'all') matches = matches.filter(m => m.phase + '-' + m.round === fixtureRound);
-  const roundOptions = [...new Set(s.matches.map(m => m.phase + '-' + m.round))].sort((a, b) => { const [pa, na] = a.split('-'), [pb, nb] = b.split('-'); return pa.localeCompare(pb) || Number(na) - Number(nb); });
+  if (fixturePlayer !== 'all') matches = matches.filter(m => m.a === fixturePlayer || m.b === fixturePlayer);
   const filterNames = { mine: 'Maçlarım', all: 'Tüm maçlar', pending: 'Onay bekleyen', done: 'Tamamlanan' };
-  const roundName = x => { const [phase, n] = x.split('-'); return phase === 'league' ? n + '. Hafta' : phase === 'group' ? n + '. Grup turu' : knockoutLabel(Number(n), s.bracket?.size); };
-  return `${header('FİKSTÜR', 'Maç takvimi', 'Tüm karşılaşmalar, sonuçlar ve onay durumları.', `<span class="badge">${fmt(s.matches.length)} maç</span>`)}
+  const people = [...s.players].filter(id => !(filter === 'mine' && id === pid)).sort((a, b) => nickname(a).localeCompare(nickname(b), 'tr'));
+  const focus = filter === 'mine' ? pid : fixturePlayer !== 'all' ? fixturePlayer : null;
+  const by = (statuses, order) => matches.filter(m => statuses.includes(m.status)).sort(order);
+  const sections = [
+    ['Onay bekleyen', by(['pending', 'disputed'], (x, y) => (x.pendingBy === pid) - (y.pendingBy === pid) || playOrder(focus)(x, y))],
+    ['Oynanacak', by(['scheduled'], playOrder(focus))],
+    ['Eşleşme bekleniyor', by(['waiting'], (x, y) => x.round - y.round || x.slot - y.slot)],
+    ['Tamamlanan', by(['done'], (x, y) => (y.finalizedAt || 0) - (x.finalizedAt || 0))]
+  ].filter(([, list]) => list.length);
+  return `${header('FİKSTÜR', 'Maçlar', 'Sabit hafta yok: açık maçlar istenen sırayla oynanır. Sonucu oyunculardan biri girer, rakip onaylar.', `<span class="badge">${fmt(s.matches.length)} maç</span>`)}
   ${accountNotice()}${s.format === 'cup' ? cupInfo(s) : ''}
-  <div class="card pad"><div class="filters"><div class="tabs">${options.map(x => `<button class="tab ${filter === x ? 'active' : ''}" data-filter="${x}">${filterNames[x]}</button>`).join('')}</div><label class="field" style="min-width:145px"><span class="sr-only">Tur seç</span><select class="select" id="roundSelect"><option value="all">Tüm turlar</option>${roundOptions.map(x => `<option value="${x}" ${fixtureRound === x ? 'selected' : ''}>${roundName(x)}</option>`).join('')}</select></label></div>
-  <div class="match-list">${matches.length ? matches.slice(0, 1500).map(m => matchCard(m, s)).join('') : '<div class="empty"><strong>Burada henüz maç yok.</strong>Başka bir filtre seçebilirsiniz.</div>'}</div></div>`;
+  <div class="card pad"><div class="filters"><div class="tabs">${options.map(x => `<button class="tab ${filter === x ? 'active' : ''}" data-filter="${x}">${filterNames[x]}</button>`).join('')}</div><label class="field" style="min-width:160px"><span class="sr-only">Oyuncu seç</span><select class="select" id="playerSelect"><option value="all">${filter === 'mine' ? 'Tüm rakipler' : 'Tüm oyuncular'}</option>${people.map(id => `<option value="${esc(id)}" ${fixturePlayer === id ? 'selected' : ''}>${esc(nickname(id))}</option>`).join('')}</select></label></div>
+  ${sections.length ? sections.map(([title, list]) => `<div class="round-label">${title} <span class="muted">(${fmt(list.length)})</span></div><div class="match-list">${list.slice(0, 800).map(m => matchCard(m, s)).join('')}</div>`).join('') : '<div class="empty"><strong>Burada maç yok.</strong>Başka bir filtre seçebilirsiniz.</div>'}</div>`;
 }
 
 function cupInfo(s) { return `<div class="notice mb">${s.stage === 'groups' ? `Grup aşaması devam ediyor. ${fmt(s.groups.length)} grup var. Bütün grup maçları tamamlanınca eleme tablosu oluşturulur.` : `Grup aşaması tamamlandı. Son ${s.bracket?.size} eleme tablosu açık.`}</div>${s.stage === 'knockout' ? knockoutView(s) : ''}`; }
@@ -395,19 +417,20 @@ function action(name, id) {
     case 'confirmMatch': return run(() => api.respondScore(id, true), 'Maç sonucu onaylandı, puan durumu ve Elo güncellendi.');
     case 'disputeMatch': return run(() => api.respondScore(id, false), 'İtiraz kaydedildi, yönetici incelemesi gerekiyor.');
     case 'resetMatch': return confirm('Bu maçın sonucu silinsin mi? Puan durumu ve Elo yeniden hesaplanır.') && run(() => api.adminResetMatch(id), 'Maç sonucu sıfırlandı.');
-    case 'selectSeason': rememberSeason(id); fixtureRound = 'all'; view = 'home'; return render();
+    case 'selectSeason': rememberSeason(id); fixturePlayer = 'all'; view = 'home'; return render();
     case 'approveProfile': return openApprove(id);
     case 'rejectProfile': return confirm('Bu hesap reddedilsin mi?') && run(() => api.rejectProfile(id), 'Hesap reddedildi.');
     case 'toggleAdminRole': { const p = data.profiles.find(x => x.id === id); return p && confirm(p.is_admin ? `${p.username} yöneticilikten çıkarılsın mı?` : `${p.username} yönetici yapılsın mı? Tüm yönetici işlemlerini yapabilecek.`) && run(() => api.adminSetAdmin(id, !p.is_admin), 'Yetki güncellendi.'); }
     case 'resetPassword': return openResetPassword(id);
     case 'manageMember': return openMember(id);
+    case 'myMatches': view = 'fixtures'; fixtureFilter = 'mine'; fixturePlayer = 'all'; render(); return window.scrollTo({ top: 0, behavior: 'instant' });
     case 'toggleMembers': membersOpen = !membersOpen; return render();
     case 'toggleRoster': { const checks = $$('input[name="players"]', $('#roster')); const all = checks.every(x => x.checked); checks.forEach(x => { x.checked = !all; }); return; }
     case 'createBracket': {
       const s = activeSeason();
       let plan;
       try { plan = planKnockout(s, nickname); } catch (e) { return notify(e.message); }
-      return run(() => api.adminCreateKnockout(s.id, plan), () => { view = 'fixtures'; fixtureFilter = 'all'; fixtureRound = 'all'; render(); return 'Son ' + plan.bracket.size + ' eleme tablosu hazır.'; });
+      return run(() => api.adminCreateKnockout(s.id, plan), () => { view = 'fixtures'; fixtureFilter = 'all'; fixturePlayer = 'all'; render(); return 'Son ' + plan.bracket.size + ' eleme tablosu hazır.'; });
     }
     case 'exportData': downloadData(); return notify('JSON yedeği indirildi.');
     case 'deleteSeason': {
@@ -460,7 +483,7 @@ function handleSubmit(e) {
       const format = d.get('format') === 'cup' ? 'cup' : 'league', legs = Number(d.get('legs')) === 1 ? 1 : 2, size = Number(d.get('groupSize')) || 5;
       const strategy = ['pots', 'bands', 'random'].includes(d.get('seedStrategy')) ? String(d.get('seedStrategy')) : 'pots';
       const plan = planSeason({ format, ids, legs, strategy, size, eloMap: elo() });
-      return run(async () => { const sid = await api.adminCreateSeason({ name, format, legs, strategy, ids, plan }); rememberSeason(sid); view = 'fixtures'; fixtureFilter = 'all'; fixtureRound = 'all'; },
+      return run(async () => { const sid = await api.adminCreateSeason({ name, format, legs, strategy, ids, plan }); rememberSeason(sid); view = 'fixtures'; fixtureFilter = 'all'; fixturePlayer = 'all'; },
         `Yeni ${format === 'league' ? 'lig' : 'kupa'} fikstürü oluşturuldu: ${plan.matches.length} maç.`);
     }
   } catch (err) { notify(err.message || 'İşlem tamamlanamadı.'); }
@@ -468,8 +491,8 @@ function handleSubmit(e) {
 
 function change(e) {
   const t = e.target;
-  if (t.id === 'seasonSwitch') { rememberSeason(t.value); fixtureRound = 'all'; render(); }
-  else if (t.id === 'roundSelect') { fixtureRound = t.value; render(); }
+  if (t.id === 'seasonSwitch') { rememberSeason(t.value); fixturePlayer = 'all'; render(); }
+  else if (t.id === 'playerSelect') { fixturePlayer = t.value; render(); }
   else if (t.id === 'format') { const cup = t.value === 'cup'; $('#legsWrap').style.display = cup ? 'none' : ''; $('#seedWrap').style.display = cup ? '' : 'none'; $('#sizeWrap').style.display = cup ? '' : 'none'; $('#seasonName').value = new Date().getFullYear() + (cup ? ' Kupası' : ' Ligi'); }
 }
 
@@ -480,9 +503,9 @@ function setupPage() {
 async function start() {
   document.addEventListener('click', e => {
     const nav = e.target.closest('[data-nav]');
-    if (nav) { view = nav.dataset.nav; if (view === 'fixtures') fixtureRound = 'all'; closeModal(); render(); window.scrollTo({ top: 0, behavior: 'instant' }); return; }
+    if (nav) { view = nav.dataset.nav; if (view === 'fixtures') fixturePlayer = 'all'; closeModal(); render(); window.scrollTo({ top: 0, behavior: 'instant' }); return; }
     const filter = e.target.closest('[data-filter]');
-    if (filter) { fixtureFilter = filter.dataset.filter; fixtureRound = 'all'; render(); return; }
+    if (filter) { fixtureFilter = filter.dataset.filter; fixturePlayer = 'all'; render(); return; }
     const button = e.target.closest('[data-action]');
     if (button) { action(button.dataset.action, button.dataset.id); return; }
     if (e.target.id === 'overlay') closeModal();
