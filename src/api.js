@@ -38,10 +38,10 @@ export function onAuthChange(fn) {
 export async function signIn(username, password) {
   return unwrap(await sb.auth.signInWithPassword({ email: loginEmail(username), password })).session;
 }
-export async function signUp(username, password, realName) {
+export async function signUp(username, password, realName, gradYear) {
   const data = unwrap(await sb.auth.signUp({
     email: loginEmail(username), password,
-    options: { data: { username: username.trim(), real_name: realName?.trim() || null } }
+    options: { data: { username: username.trim(), real_name: realName?.trim() || null, grad_year: gradYear ? String(gradYear) : null } }
   }));
   if (!data.session) throw new Error('Hesap oluşturuldu ancak giriş açılmadı: Supabase\'de "Confirm email" kapatılmalı.');
   return data.session;
@@ -75,15 +75,15 @@ export async function loadAll({ member = false, admin = false } = {}) {
     selectAll('players', 'id, username, created_at'),
     selectAll('seasons', '*', 'created_at'),
     selectAll('matches', '*'),
-    member ? selectAll('player_private', 'player_id, real_name', 'player_id') : [],
-    admin ? selectAll('profiles', 'id, username, username_key, real_name, status, is_admin, player_id, created_at', 'created_at') : [],
+    member ? selectAll('player_private', 'player_id, real_name, grad_year', 'player_id') : [],
+    admin ? selectAll('profiles', 'id, username, username_key, real_name, grad_year, status, is_admin, player_id, created_at', 'created_at') : [],
     admin ? unwrap(await sb.from('audit_log').select('*').order('id', { ascending: false }).limit(60)) : []
   ]);
-  const realName = new Map(names.map(n => [n.player_id, n.real_name]));
+  const details = new Map(names.map(n => [n.player_id, n]));
   const bySeason = new Map(seasons.map(s => [s.id, []]));
   for (const m of matches) bySeason.get(m.season_id)?.push(toMatch(m));
   return {
-    players: players.map(p => ({ id: p.id, username: p.username, realName: realName.get(p.id) || null })),
+    players: players.map(p => ({ id: p.id, username: p.username, realName: details.get(p.id)?.real_name || null, gradYear: details.get(p.id)?.grad_year || null })),
     seasons: seasons.map(s => ({
       id: s.id, name: s.name, format: s.format, status: s.status, stage: s.stage, legs: s.legs,
       seedStrategy: s.seed_strategy, players: s.player_ids, groups: s.groups || [], bracket: s.bracket,
@@ -118,7 +118,8 @@ const call = async (fn, args) => unwrap(await sb.rpc(fn, args));
 
 export const submitScore = (id, a, b) => call('submit_score', { p_match: id, p_a: a, p_b: b });
 export const respondScore = (id, accept) => call('respond_score', { p_match: id, p_accept: accept });
-export const updateMyProfile = realName => call('update_my_profile', { p_real_name: realName });
+export const updateMyProfile = (realName, gradYear) => call('update_my_profile', { p_real_name: realName, p_grad_year: gradYear ?? null });
+export const adminUpdatePlayer = (id, realName, gradYear) => call('admin_update_player', { p_player: id, p_real_name: realName || null, p_grad_year: gradYear ?? null });
 
 export const adminSetScore = (id, a, b) => call('admin_set_score', { p_match: id, p_a: a, p_b: b });
 export const adminResetMatch = id => call('admin_reset_match', { p_match: id });

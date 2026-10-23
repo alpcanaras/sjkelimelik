@@ -224,3 +224,33 @@ test('members can update their own real name', async () => {
   const pid = await playerOf(u.mehmet);
   assert.equal((await db.query('select real_name from public.player_private where player_id=$1', [pid])).rows[0].real_name, 'Mehmet Yılmaz');
 });
+
+test('profile details: graduation year is self-editable, admin-editable, members-only, and merged on approval', async () => {
+  const mehmet = await playerOf(u.mehmet);
+  const details = async pid => (await db.query('select real_name, grad_year from public.player_private where player_id=$1', [pid])).rows[0];
+  await rpc(u.mehmet, 'update_my_profile', ['Mehmet Yılmaz', 2009]);
+  assert.deepEqual(await details(mehmet), { real_name: 'Mehmet Yılmaz', grad_year: 2009 });
+  await assert.rejects(rpc(u.mehmet, 'update_my_profile', ['Mehmet', 1900]), /Mezuniyet yılı/);
+  await rpc(u.mehmet, 'update_my_profile', ['Mehmet Yılmaz', null]);
+  assert.equal((await details(mehmet)).grad_year, null, 'a member can clear their year');
+
+  assert.equal((await as(null, 'select grad_year from public.player_private')).length, 0, 'visitors cannot see details');
+  assert.ok((await as(u['Ayşe'], 'select grad_year from public.player_private')).length > 0, 'members can');
+
+  // An admin fills in someone who has no account yet; when that person signs up without details,
+  // approval keeps the admin's entry and shows it on their account.
+  const pid = await rpc(u.alp, 'admin_add_player', ['sonradan', null]);
+  await assert.rejects(rpc(u.mehmet, 'admin_update_player', [pid, 'X', 2000]), /yönetici/);
+  await rpc(u.alp, 'admin_update_player', [pid, 'Sonradan Gelen', 1998]);
+  const acc = await signup('sonradan');
+  await rpc(u.alp, 'approve_profile', [acc, null]);
+  assert.deepEqual(await details(pid), { real_name: 'Sonradan Gelen', grad_year: 1998 });
+  const prof = (await db.query('select real_name, grad_year, player_id from public.profiles where id=$1', [acc])).rows[0];
+  assert.deepEqual(prof, { real_name: 'Sonradan Gelen', grad_year: 1998, player_id: pid });
+
+  // Sign-up metadata carries the year; garbage is ignored rather than failing the sign-up.
+  const { rows } = await db.query(`insert into auth.users (email, raw_user_meta_data) values ($1, $2), ($3, $4) returning id`,
+    [`yil2015@${DOMAIN}`, { username: 'yil2015', grad_year: '2015' }, `yilbozuk@${DOMAIN}`, { username: 'yilbozuk', grad_year: 'abc' }]);
+  const years = (await db.query('select grad_year from public.profiles where id = any($1) order by username', [rows.map(r => r.id)])).rows.map(r => r.grad_year);
+  assert.deepEqual(years, [2015, null]);
+});

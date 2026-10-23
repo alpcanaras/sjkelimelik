@@ -6,6 +6,7 @@ import { pgcrypto } from '/node_modules/@electric-sql/pglite/dist/contrib/pgcryp
 import { usernameKey, loginLocal, planSeason } from './engine.js';
 
 const DOMAIN = 'kullanici.sjkelimelik.invalid';
+const MIGRATIONS = ['20261017000000_init.sql', '20261018000000_username_symbols.sql', '20261023000000_profile_details.sql'];
 const SESSION_KEY = 'fake-session';
 const STUB = `
   create role anon nologin; create role authenticated nologin; create role supabase_auth_admin nologin;
@@ -36,11 +37,11 @@ async function as(user, sql, params = []) {
 }
 const clean = e => new Error(String(e.message || e).replace(/^error:\s*/i, ''));
 
-async function createUser(username, password, realName) {
+async function createUser(username, password, realName, gradYear) {
   const { rows } = await db.query(
     `insert into auth.users (email, encrypted_password, raw_user_meta_data)
      values ($1, extensions.crypt($2, extensions.gen_salt('bf')), $3) returning id`,
-    [loginLocal(usernameKey(username)) + '@' + DOMAIN, password, { username, real_name: realName || null }]);
+    [loginLocal(usernameKey(username)) + '@' + DOMAIN, password, { username, real_name: realName || null, grad_year: gradYear ? String(gradYear) : null }]);
   return rows[0].id;
 }
 
@@ -49,7 +50,7 @@ const ready = (async () => {
   const exists = (await db.query(`select to_regclass('public.players') as t`)).rows[0].t;
   if (exists) return;
   await db.exec(STUB);
-  await db.exec(await (await fetch('/supabase/migrations/20261017000000_init.sql')).text());
+  for (const f of MIGRATIONS) await db.exec(await (await fetch('/supabase/migrations/' + f)).text());
   const names = ['alp', 'Ayşe', 'mehmet', 'zeynep', 'ahmet', 'selin'];
   const ids = {};
   for (const n of names) ids[n] = await createUser(n, 'test1234', n === 'Ayşe' ? 'Ayşe Erdem' : null);
@@ -80,9 +81,9 @@ export async function signIn(username, password) {
   if (!row) throw new Error('Kullanıcı adı veya şifre hatalı.');
   return setSession(row.id);
 }
-export async function signUp(username, password, realName) {
+export async function signUp(username, password, realName, gradYear) {
   await ready;
-  try { return setSession(await createUser(username.trim(), password, realName?.trim())); }
+  try { return setSession(await createUser(username.trim(), password, realName?.trim(), gradYear)); }
   catch (e) { throw /unique|duplicate/i.test(e.message) ? new Error('Bu kullanıcı adı alınmış.') : clean(e); }
 }
 export async function signOut() { setSession(null); }
@@ -102,13 +103,13 @@ export async function loadAll({ member = false, admin = false } = {}) {
     q('select id, username, created_at from public.players order by id'),
     q('select * from public.seasons order by created_at'),
     q('select * from public.matches order by id'),
-    member ? q('select player_id, real_name from public.player_private') : [],
-    admin ? q('select id, username, username_key, real_name, status, is_admin, player_id, created_at from public.profiles order by created_at') : [],
+    member ? q('select player_id, real_name, grad_year from public.player_private') : [],
+    admin ? q('select id, username, username_key, real_name, grad_year, status, is_admin, player_id, created_at from public.profiles order by created_at') : [],
     admin ? q('select * from public.audit_log order by id desc limit 60') : []
   ]);
-  const realName = new Map(names.map(n => [n.player_id, n.real_name]));
+  const details = new Map(names.map(n => [n.player_id, n]));
   return {
-    players: players.map(p => ({ id: p.id, username: p.username, realName: realName.get(p.id) || null })),
+    players: players.map(p => ({ id: p.id, username: p.username, realName: details.get(p.id)?.real_name || null, gradYear: details.get(p.id)?.grad_year || null })),
     seasons: seasons.map(s => ({
       id: s.id, name: s.name, format: s.format, status: s.status, stage: s.stage, legs: s.legs, seedStrategy: s.seed_strategy,
       players: s.player_ids, groups: s.groups || [], bracket: s.bracket, createdAt: s.created_at,
@@ -132,7 +133,8 @@ async function call(fn, args) {
 }
 export const submitScore = (id, a, b) => call('submit_score', { p_match: id, p_a: a, p_b: b });
 export const respondScore = (id, accept) => call('respond_score', { p_match: id, p_accept: accept });
-export const updateMyProfile = realName => call('update_my_profile', { p_real_name: realName });
+export const updateMyProfile = (realName, gradYear) => call('update_my_profile', { p_real_name: realName, p_grad_year: gradYear ?? null });
+export const adminUpdatePlayer = (id, realName, gradYear) => call('admin_update_player', { p_player: id, p_real_name: realName || null, p_grad_year: gradYear ?? null });
 export const adminSetScore = (id, a, b) => call('admin_set_score', { p_match: id, p_a: a, p_b: b });
 export const adminResetMatch = id => call('admin_reset_match', { p_match: id });
 export const adminCreateSeason = ({ name, format, legs, strategy, ids, plan }) => call('admin_create_season', {

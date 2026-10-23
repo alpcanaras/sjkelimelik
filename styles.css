@@ -180,3 +180,8 @@ body.busy .modal button[type=submit],body.busy [data-action=confirmMatch],body.b
 .nav .nav-badge{box-shadow:none}
 .mobile-nav button{position:relative}
 .mobile-nav .nav-badge{position:absolute;top:-2px;left:calc(50% + 4px);margin:0;min-width:17px;height:17px;line-height:17px;font-size:10px;padding:0 4px}
+
+/* Real name + graduation year under usernames (members only). */
+.name-stack{display:inline-block;vertical-align:middle;line-height:1.25}
+.person-sub{display:block;font-size:11px;font-weight:500;color:var(--muted);max-width:190px;overflow:hidden;text-overflow:ellipsis}
+.profile-intro{flex-wrap:wrap}
