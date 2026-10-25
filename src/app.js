@@ -200,8 +200,8 @@ function signupCard(sg) {
   const open = isOpenSignup(sg), joined = sg.entries.some(e => e.mine), themed = isCumhuriyet(sg);
   const chips = sg.entries.length ? `<div class="chips">${sg.entries.map(e => `<span class="chip${e.mine ? ' me' : ''}${e.approved ? '' : ' pending'}">${esc(e.username)}</span>`).join('')}</div>` : '';
   const action = !open || me?.status === 'rejected' ? ''
-    : joined ? `<button class="btn secondary small" data-action="signupWithdraw" data-id="${esc(sg.id)}">${icon('check', 15)} Çekilin</button>`
-    : `<button class="btn" data-action="signupJoin" data-id="${esc(sg.id)}">Katılın ${icon('right', 15)}</button>`;
+    : joined ? `<button class="btn secondary small" data-action="signupWithdraw" data-id="${esc(sg.id)}">${icon('check', 15)} Çekil</button>`
+    : `<button class="btn" data-action="signupJoin" data-id="${esc(sg.id)}">Katıl ${icon('right', 15)}</button>`;
   const admin = isAdmin() ? `<div class="actions mt admin-row"><button class="btn secondary small" data-action="editSignup" data-id="${esc(sg.id)}">Düzenle</button><button class="btn ${open ? 'secondary ' : ''}small" data-action="createFromSignup" data-id="${esc(sg.id)}">${icon('trophy', 14)} Turnuvayı oluştur</button><button class="btn secondary small" data-action="closeSignup" data-id="${esc(sg.id)}">Kapat</button></div>` : '';
   return `<section class="card signup-card ${themed ? 'cumhuriyet' : 'hero'} mb">${themed ? crescentMark : ''}<h2>${esc(sg.title)}</h2>${open ? countdownHtml(sg) : ''}${action ? `<div class="actions mt">${action}</div>` : ''}${chips}${admin}</section>`;
 }
