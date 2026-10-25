@@ -644,6 +644,16 @@ async function start() {
     catch (e) { console.error(e); }
   }, 45000);
   document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && !busy) refresh().catch(console.error); });
+  // Phones keep tabs open for days. When someone returns to an old tab after a deploy, reload it
+  // (unless a dialog is open) so nobody keeps running outdated rules.
+  const siteVersion = () => Promise.all(['src/app.js', 'src/engine.js', 'src/api.js', 'styles.css']
+    .map(f => fetch(f, { method: 'HEAD', cache: 'no-store' }).then(r => r.headers.get('etag') || ''))).then(v => v.join('|'));
+  const loadedVersion = await siteVersion().catch(() => null);
+  document.addEventListener('visibilitychange', async () => {
+    if (document.visibilityState !== 'visible' || !loadedVersion) return;
+    const now = await siteVersion().catch(() => null);
+    if (now && now !== loadedVersion && !document.querySelector('.modal')) location.reload();
+  });
 }
 
 start();
