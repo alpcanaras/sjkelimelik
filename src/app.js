@@ -197,21 +197,13 @@ function tickCountdowns() {
 }
 
 function signupCard(sg) {
-  const open = isOpenSignup(sg), joined = sg.entries.some(e => e.mine), n = sg.entries.length, themed = isCumhuriyet(sg);
-  const chips = n ? `<div class="chips">${sg.entries.map(e => `<span class="chip${e.mine ? ' me' : ''}${e.approved ? '' : ' pending'}"${e.approved ? '' : ' title="Hesap onayı bekliyor"'}>${esc(e.username)}</span>`).join('')}</div>` : `<p class="signup-note">${open ? 'İlk katılan siz olun!' : 'Kimse katılmadı.'}</p>`;
-  let actions = '';
-  if (open) {
-    if (!session) actions = `<button class="btn" data-action="signupJoin" data-id="${esc(sg.id)}">Katılın ${icon('right', 15)}</button><span class="signup-note">Hesabınız yoksa birkaç saniyede oluşturabilirsiniz.</span>`;
-    else if (me?.status === 'rejected') actions = '<span class="signup-note">Hesabınız onaylanmadığı için katılamazsınız.</span>';
-    else if (joined) actions = `<span class="joined">${icon('check', 16)} Katıldınız</span><button class="btn secondary small" data-action="signupWithdraw" data-id="${esc(sg.id)}">Çekilin</button>`;
-    else actions = `<button class="btn" data-action="signupJoin" data-id="${esc(sg.id)}">Katılın ${icon('right', 15)}</button>`;
-  }
-  const admin = isAdmin() ? `<div class="actions mt admin-row"><button class="btn secondary small" data-action="editSignup" data-id="${esc(sg.id)}">Kaydı düzenleyin</button><button class="btn ${open ? 'secondary ' : ''}small" data-action="createFromSignup" data-id="${esc(sg.id)}">${icon('trophy', 14)} Turnuvayı oluşturun</button><button class="btn secondary small" data-action="closeSignup" data-id="${esc(sg.id)}">Kaydı kapatın</button></div>` : '';
-  const kicker = themed ? `CUMHURİYETİMİZİN ${new Date(sg.closesAt).getFullYear() - 1923}. YILI · TURNUVA KAYDI` : 'YENİ SEZON KAYDI';
-  return `<section class="card signup-card ${themed ? 'cumhuriyet' : 'hero'} mb">${themed ? crescentMark : ''}<div class="kicker">${kicker}</div><h2>${esc(sg.title)}</h2>
-  <p class="signup-note">${open ? `Kayıtlar <b>${esc(trDateTime(sg.closesAt))}</b>'da kapanıyor (Türkiye saati). O zamana kadar katılabilir veya çekilebilirsiniz.` : 'Kayıtlar kapandı. Fikstür yakında açıklanacak!'}</p>
-  ${open ? countdownHtml(sg) : ''}<div class="signup-count">Katılanlar (${n})</div>${chips}
-  ${actions ? `<div class="actions mt">${actions}</div>` : ''}${admin}</section>`;
+  const open = isOpenSignup(sg), joined = sg.entries.some(e => e.mine), themed = isCumhuriyet(sg);
+  const chips = sg.entries.length ? `<div class="chips">${sg.entries.map(e => `<span class="chip${e.mine ? ' me' : ''}${e.approved ? '' : ' pending'}">${esc(e.username)}</span>`).join('')}</div>` : '';
+  const action = !open || me?.status === 'rejected' ? ''
+    : joined ? `<button class="btn secondary small" data-action="signupWithdraw" data-id="${esc(sg.id)}">${icon('check', 15)} Çekilin</button>`
+    : `<button class="btn" data-action="signupJoin" data-id="${esc(sg.id)}">Katılın ${icon('right', 15)}</button>`;
+  const admin = isAdmin() ? `<div class="actions mt admin-row"><button class="btn secondary small" data-action="editSignup" data-id="${esc(sg.id)}">Düzenle</button><button class="btn ${open ? 'secondary ' : ''}small" data-action="createFromSignup" data-id="${esc(sg.id)}">${icon('trophy', 14)} Turnuvayı oluştur</button><button class="btn secondary small" data-action="closeSignup" data-id="${esc(sg.id)}">Kapat</button></div>` : '';
+  return `<section class="card signup-card ${themed ? 'cumhuriyet' : 'hero'} mb">${themed ? crescentMark : ''}<h2>${esc(sg.title)}</h2>${open ? countdownHtml(sg) : ''}${action ? `<div class="actions mt">${action}</div>` : ''}${chips}${admin}</section>`;
 }
 const signupCards = () => (data.signups || []).map(signupCard).join('');
 

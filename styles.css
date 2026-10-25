@@ -272,3 +272,5 @@ body.busy .modal button[type=submit],body.busy [data-action=confirmMatch],body.b
  .signup-card .countdown div{min-width:60px;padding:10px 6px}
  .signup-card .countdown b{font-size:26px}
 }
+.signup-card h2{margin-top:0}
+.signup-card .chips{margin-top:14px}
