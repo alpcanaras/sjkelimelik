@@ -83,7 +83,7 @@ test('usernames with symbols sign up through the encoded login key; plain names 
   }
   assert.equal(loginLocal(usernameKey('Ayşe')), 'ayse', 'existing-style names are unchanged');
   assert.equal((await db.query(`select public.login_local('kelime.ustasi') as l`)).rows[0].l, 'kelime.ustasi');
-  await assert.rejects(signup('iki kelime'), /Geçersiz/);
+  await assert.rejects(signup('iki  kelime'), /Geçersiz/, 'double spaces are not a valid name');
   await assert.rejects(signup('!!!'), /Geçersiz/);
   await assert.rejects(signup('kelime!'), /duplicate|unique/i, 'case-insensitive with symbols too');
   await db.query(`delete from auth.users where email like 'h-%'`);
@@ -253,4 +253,16 @@ test('profile details: graduation year is self-editable, admin-editable, members
     [`yil2015@${DOMAIN}`, { username: 'yil2015', grad_year: '2015' }, `yilbozuk@${DOMAIN}`, { username: 'yilbozuk', grad_year: 'abc' }]);
   const years = (await db.query('select grad_year from public.profiles where id = any($1) order by username', [rows.map(r => r.id)])).rows.map(r => r.grad_year);
   assert.deepEqual(years, [2015, null]);
+});
+
+test('usernames with single spaces sign up; leading, trailing and double spaces are rejected by the database', async () => {
+  const id = await signup('Ali Veli');
+  const row = (await db.query('select u.email, p.username_key from auth.users u join public.profiles p on p.id = u.id where u.id=$1', [id])).rows[0];
+  assert.equal(row.username_key, 'ali veli');
+  assert.equal(row.email.split('@')[0], loginLocal('ali veli'));
+  for (const bad of [' Ali', 'Ali ', 'Ali  Veli']) {
+    await assert.rejects(db.query(`insert into auth.users (email, raw_user_meta_data) values ($1, $2)`,
+      [loginLocal(usernameKey(bad)) + '@' + DOMAIN, { username: bad }]), /Geçersiz/, JSON.stringify(bad));
+  }
+  await assert.rejects(signup('ali veli'), /duplicate|unique/i, 'case-insensitive with spaces too');
 });

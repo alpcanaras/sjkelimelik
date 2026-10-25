@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { createFixtures, planSeason, planKnockout, ratings, rankings, groupSizes, usernameKey, validUsername, loginLocal } from '../src/engine.js';
+import { createFixtures, planSeason, planKnockout, ratings, rankings, groupSizes, usernameKey, validUsername, loginLocal, normalizeUsername } from '../src/engine.js';
 
 const ids = n => Array.from({ length: n }, (_, i) => 'p' + (i + 1));
 let seq = 0;
@@ -95,7 +95,10 @@ test('username rules match the SQL rules', () => {
   assert.equal(usernameKey('Şule_İpek'), 'sule_ipek');
   assert.equal(usernameKey('ÇĞÖÜığ'), 'cgouig');
   for (const ok of ['alp', 'Ayşe', 'kelime.ustasi', 'oyuncu_42', 'Kelime!', '@lp', 'a-b', 'neden?', '.alp.']) assert.ok(validUsername(ok), ok);
-  for (const bad of ['al', 'a b c', 'x'.repeat(21), '!!!', 'tab\tname', 'emoji😀x']) assert.ok(!validUsername(bad), bad);
+  for (const ok of ['Ali Veli', 'kelime ustası 42', 'a b c']) assert.ok(validUsername(ok), ok);
+  for (const bad of ['al', ' ali', 'ali ', 'ali  veli', 'x'.repeat(21), '!!!', 'tab\tname', 'emoji😀x']) assert.ok(!validUsername(bad), bad);
+  assert.equal(normalizeUsername('  Ali   Veli '), 'Ali Veli');
+  assert.equal(loginLocal(usernameKey('Ali Veli')), 'h-616c692076656c69', 'spaces use the encoded key');
   assert.equal(loginLocal('kungfu_manda'), 'kungfu_manda');
   assert.equal(loginLocal('kelime!'), 'h-6b656c696d6521');
   assert.ok(loginLocal('x'.repeat(20) + '').length <= 64 && loginLocal('!'.repeat(19) + 'a').length <= 64, 'always a valid email length');

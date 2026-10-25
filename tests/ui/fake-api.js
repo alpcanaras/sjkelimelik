@@ -3,10 +3,10 @@
    Served in place of src/api.js by tests/ui/serve.mjs. Data persists in IndexedDB; ?reset clears it. */
 import { PGlite } from '/node_modules/@electric-sql/pglite/dist/index.js';
 import { pgcrypto } from '/node_modules/@electric-sql/pglite/dist/contrib/pgcrypto.js';
-import { usernameKey, loginLocal, planSeason } from './engine.js';
+import { usernameKey, loginLocal, normalizeUsername, planSeason } from './engine.js';
 
 const DOMAIN = 'kullanici.sjkelimelik.invalid';
-const MIGRATIONS = ['20261017000000_init.sql', '20261018000000_username_symbols.sql', '20261023000000_profile_details.sql'];
+const MIGRATIONS = ['20261017000000_init.sql', '20261018000000_username_symbols.sql', '20261023000000_profile_details.sql', '20261025000000_username_spaces.sql'];
 const SESSION_KEY = 'fake-session';
 const STUB = `
   create role anon nologin; create role authenticated nologin; create role supabase_auth_admin nologin;
@@ -77,13 +77,13 @@ function setSession(id) { uid = id; id ? localStorage.setItem(SESSION_KEY, id) :
 export async function signIn(username, password) {
   await ready;
   const row = (await db.query(`select id from auth.users where email = $1 and encrypted_password = extensions.crypt($2, encrypted_password)`,
-    [loginLocal(usernameKey(username.trim())) + '@' + DOMAIN, password])).rows[0];
+    [loginLocal(usernameKey(normalizeUsername(username))) + '@' + DOMAIN, password])).rows[0];
   if (!row) throw new Error('Kullanıcı adı veya şifre hatalı.');
   return setSession(row.id);
 }
 export async function signUp(username, password, realName, gradYear) {
   await ready;
-  try { return setSession(await createUser(username.trim(), password, realName?.trim(), gradYear)); }
+  try { return setSession(await createUser(normalizeUsername(username), password, realName?.trim(), gradYear)); }
   catch (e) { throw /unique|duplicate/i.test(e.message) ? new Error('Bu kullanıcı adı alınmış.') : clean(e); }
 }
 export async function signOut() { setSession(null); }

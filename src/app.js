@@ -2,7 +2,7 @@
    Every write goes through a server function that re-checks permissions, so the checks
    here only decide what to show. */
 import * as api from './api.js';
-import { ratings, rankings, planSeason, planKnockout, knockoutLabel, START_ELO, validUsername, usernameKey, USERNAME_RULE } from './engine.js';
+import { ratings, rankings, planSeason, planKnockout, knockoutLabel, START_ELO, validUsername, usernameKey, normalizeUsername, USERNAME_RULE } from './engine.js';
 
 const THEME_KEY = 'sj-kelimelik-theme';
 const SEASON_KEY = 'sj-kelimelik-season';
@@ -470,7 +470,7 @@ function handleSubmit(e) {
       return run(async () => { session = await api.signIn(str('username'), String(d.get('password'))); }, () => 'Hoş geldiniz, ' + (me?.username || '') + '!');
     }
     if (f.id === 'signupForm') {
-      const username = str('username');
+      const username = normalizeUsername(str('username'));
       if (!validUsername(username)) throw Error('Kullanıcı adı geçersiz. ' + USERNAME_RULE);
       if (String(d.get('password')).length < 8) throw Error('Şifre en az 8 karakter olmalı.');
       if (d.get('password') !== d.get('password2')) throw Error('Şifreler eşleşmiyor.');
@@ -488,7 +488,7 @@ function handleSubmit(e) {
     if (f.id === 'approveForm') return run(() => api.approveProfile(str('profile'), str('player') || null), 'Hesap onaylandı.');
     if (f.id === 'resetForm') return run(() => api.adminResetPassword(str('profile'), String(d.get('password'))), 'Şifre değiştirildi. Yeni şifreyi kişiye iletin.');
     if (f.id === 'addPlayerForm') {
-      const username = str('username');
+      const username = normalizeUsername(str('username'));
       if (!validUsername(username)) throw Error('Kullanıcı adı geçersiz. ' + USERNAME_RULE);
       const y = year();
       return run(async () => { const pid = await api.adminAddPlayer(username, str('realName')); if (y) await api.adminUpdatePlayer(pid, str('realName'), y); }, 'Oyuncu eklendi.');

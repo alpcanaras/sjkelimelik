@@ -162,9 +162,11 @@ export const knockoutLabel = (round, size) => {
    The same rule lives in SQL (public.username_key / public.valid_username). */
 const FOLD = { 'Ç': 'C', 'Ğ': 'G', 'İ': 'I', 'Ö': 'O', 'Ş': 'S', 'Ü': 'U', 'ç': 'c', 'ğ': 'g', 'ı': 'i', 'ö': 'o', 'ş': 's', 'ü': 'u' };
 export const usernameKey = name => String(name).replace(/[ÇĞİÖŞÜçğıöşü]/g, ch => FOLD[ch]).toLowerCase();
-export const USERNAME_RULE = '3-20 karakter, boşluksuz; harf, rakam ve ! ? . _ - gibi işaretler kullanılabilir.';
+export const USERNAME_RULE = '3-20 karakter; harf, rakam, ! ? . _ - gibi işaretler ve kelimeler arasında tek boşluk kullanılabilir.';
+/* Trim and collapse spaces, so "  Ali   Veli " is the account "Ali Veli". Applied before sign-up and login. */
+export const normalizeUsername = name => String(name ?? '').trim().replace(/\s+/g, ' ');
 export function validUsername(name) {
-  return /^[!-~ÇĞİÖŞÜçğıöşü]{3,20}$/.test(name) && /[A-Za-z0-9ÇĞİÖŞÜçğıöşü]/.test(name);
+  return name.length >= 3 && name.length <= 20 && /^[!-~ÇĞİÖŞÜçğıöşü]+( [!-~ÇĞİÖŞÜçğıöşü]+)*$/.test(name) && /[A-Za-z0-9ÇĞİÖŞÜçğıöşü]/.test(name);
 }
 /* Email local part for a username key (public.login_local in SQL). Plain keys stay as they are;
    keys with symbols are hex-encoded behind "h-" so they are always a valid email address. */

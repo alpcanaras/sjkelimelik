@@ -2,13 +2,13 @@
    Maps database rows to the shapes src/engine.js works with. */
 import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/+esm';
 import config from '../config.js';
-import { usernameKey, loginLocal } from './engine.js';
+import { usernameKey, loginLocal, normalizeUsername } from './engine.js';
 
 export const configured = Boolean(config.SUPABASE_URL && config.SUPABASE_ANON_KEY);
 const sb = configured ? createClient(config.SUPABASE_URL, config.SUPABASE_ANON_KEY) : null;
 const PAGE = 1000; // PostgREST returns at most 1000 rows per request
 
-const loginEmail = username => loginLocal(usernameKey(username.trim())) + '@' + config.AUTH_EMAIL_DOMAIN;
+const loginEmail = username => loginLocal(usernameKey(normalizeUsername(username))) + '@' + config.AUTH_EMAIL_DOMAIN;
 
 const AUTH_MESSAGES = [
   [/invalid login credentials/i, 'Kullanıcı adı veya şifre hatalı.'],
@@ -41,7 +41,7 @@ export async function signIn(username, password) {
 export async function signUp(username, password, realName, gradYear) {
   const data = unwrap(await sb.auth.signUp({
     email: loginEmail(username), password,
-    options: { data: { username: username.trim(), real_name: realName?.trim() || null, grad_year: gradYear ? String(gradYear) : null } }
+    options: { data: { username: normalizeUsername(username), real_name: realName?.trim() || null, grad_year: gradYear ? String(gradYear) : null } }
   }));
   if (!data.session) throw new Error('Hesap oluşturuldu ancak giriş açılmadı: Supabase\'de "Confirm email" kapatılmalı.');
   return data.session;
