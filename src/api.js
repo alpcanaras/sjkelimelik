@@ -69,15 +69,25 @@ const toMatch = r => ({
   finalizedAt: r.finalized_at ? Date.parse(r.finalized_at) : null
 });
 
+/* Open registrations (season sign-ups) with who has joined so far. Public. */
+export async function loadSignups() {
+  const open = unwrap(await sb.from('signups').select('*').eq('status', 'open').order('closes_at'));
+  return Promise.all(open.map(async sg => ({
+    id: sg.id, title: sg.title, closesAt: Date.parse(sg.closes_at),
+    entries: unwrap(await sb.rpc('signup_list', { p_signup: sg.id })).map(e => ({ username: e.username, playerId: e.player_id, approved: e.approved, mine: e.mine }))
+  })));
+}
+
 /* Everything public, plus member/admin-only extras when the session allows them (RLS filters the rest). */
 export async function loadAll({ member = false, admin = false } = {}) {
-  const [players, seasons, matches, names, profiles, audits] = await Promise.all([
+  const [players, seasons, matches, names, profiles, audits, signups] = await Promise.all([
     selectAll('players', 'id, username, created_at'),
     selectAll('seasons', '*', 'created_at'),
     selectAll('matches', '*'),
     member ? selectAll('player_private', 'player_id, real_name, grad_year', 'player_id') : [],
     admin ? selectAll('profiles', 'id, username, username_key, real_name, grad_year, status, is_admin, player_id, created_at', 'created_at') : [],
-    admin ? unwrap(await sb.from('audit_log').select('*').order('id', { ascending: false }).limit(60)) : []
+    admin ? unwrap(await sb.from('audit_log').select('*').order('id', { ascending: false }).limit(60)) : [],
+    loadSignups()
   ]);
   const details = new Map(names.map(n => [n.player_id, n]));
   const bySeason = new Map(seasons.map(s => [s.id, []]));
@@ -90,7 +100,7 @@ export async function loadAll({ member = false, admin = false } = {}) {
       createdAt: s.created_at,
       matches: (bySeason.get(s.id) || []).sort((x, y) => x.phase.localeCompare(y.phase) || x.round - y.round || (x.slot ?? 0) - (y.slot ?? 0))
     })),
-    profiles, audits
+    profiles, audits, signups
   };
 }
 
@@ -135,6 +145,10 @@ export const approveProfile = (id, playerId = null) => call('approve_profile', {
 export const rejectProfile = id => call('reject_profile', { p_profile: id });
 export const adminAddPlayer = (username, realName) => call('admin_add_player', { p_username: username, p_real_name: realName || null });
 export const adminSetAdmin = (id, value) => call('admin_set_admin', { p_profile: id, p_value: value });
+export const signupJoin = id => call('signup_join', { p_signup: id });
+export const signupWithdraw = id => call('signup_withdraw', { p_signup: id });
+export const adminSaveSignup = (id, title, closesAt) => call('admin_save_signup', { p_signup: id || null, p_title: title, p_closes_at: closesAt });
+export const adminCloseSignup = (id, seasonId) => call('admin_close_signup', { p_signup: id, p_season: seasonId || null });
 export const adminResetPassword = (id, password) => call('admin_reset_password', { p_profile: id, p_password: password });
 
 export const crestUrl = config.CREST_URL || (configured ? config.SUPABASE_URL.replace(/\/$/, '') + '/storage/v1/object/public/branding/crest.png' : '');

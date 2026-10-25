@@ -185,3 +185,29 @@ body.busy .modal button[type=submit],body.busy [data-action=confirmMatch],body.b
 .name-stack{display:inline-block;vertical-align:middle;line-height:1.25}
 .person-sub{display:block;font-size:11px;font-weight:500;color:var(--muted);max-width:190px;overflow:hidden;text-overflow:ellipsis}
 .profile-intro{flex-wrap:wrap}
+
+/* Season sign-up card; the Cumhuriyet variant uses the flag's red with a crescent-and-star watermark. */
+.signup-card{position:relative;overflow:hidden;padding:24px}
+.signup-card h2{font-size:clamp(22px,3vw,30px);margin:6px 0 4px;letter-spacing:-.5px;position:relative}
+.signup-card .kicker,.signup-card .signup-note,.signup-card .countdown,.signup-card .chips,.signup-card .actions,.signup-card .signup-count{position:relative}
+.signup-note{font-size:13px;margin:6px 0 0;opacity:.92}
+.signup-count{font-weight:800;font-size:13px;margin-top:16px}
+.cumhuriyet{background:linear-gradient(120deg,#e30a17 0%,#c90b16 55%,#9f0712 100%);color:#fff;border:1px solid #f04a54}
+.cumhuriyet .kicker{color:#ffe1e3}
+.cumhuriyet .flag-mark{position:absolute;right:-28px;top:-18px;width:230px;opacity:.16;pointer-events:none}
+.countdown{display:flex;gap:10px;margin:16px 0 4px;flex-wrap:wrap}
+.countdown div{background:#ffffff1f;border:1px solid #ffffff40;border-radius:12px;min-width:68px;padding:10px 8px;text-align:center}
+.countdown b{display:block;font-size:28px;font-variant-numeric:tabular-nums;line-height:1.1}
+.countdown span{font-size:10px;letter-spacing:.8px;color:#ffe1e3}
+.signup-card .btn{background:#fff;color:#b30914;border-color:#fff}
+.signup-card .btn:hover{background:#fff4f4;border-color:#fff4f4}
+.signup-card .btn.secondary{background:transparent;color:#fff;border-color:#ffffff8c}
+.signup-card .btn.secondary:hover{background:#ffffff1f}
+.hero.signup-card .btn{color:#142640}
+.chips{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
+.chip{background:#ffffff26;border-radius:20px;padding:5px 11px;font-size:12px;font-weight:700}
+.chip.pending{background:transparent;border:1px dashed #ffffffb0}
+.chip.me{background:#fff;color:#b30914}
+.joined{display:inline-flex;gap:6px;align-items:center;font-weight:800}
+.admin-row{border-top:1px solid #ffffff33;padding-top:12px}
+@media(max-width:720px){.signup-card{padding:20px}.countdown div{min-width:0;flex:1}.countdown b{font-size:24px}}

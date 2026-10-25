@@ -7,7 +7,8 @@ import { ratings, rankings, planSeason, planKnockout, knockoutLabel, START_ELO, 
 const THEME_KEY = 'sj-kelimelik-theme';
 const SEASON_KEY = 'sj-kelimelik-season';
 
-let data = { players: [], seasons: [], profiles: [], audits: [] };
+let data = { players: [], seasons: [], profiles: [], audits: [], signups: [] };
+let joinAfterAuth = null; // sign-up the visitor asked to join before logging in
 let session = null, me = null, loaded = false, busy = false, eloCache = null;
 let view = 'home', fixtureFilter = null, fixturePlayer = 'all', membersOpen = false;
 let activeSeasonId = (() => { try { return localStorage.getItem(SEASON_KEY); } catch (e) { return null; } })();
@@ -144,7 +145,8 @@ function render() {
   $('#app').innerHTML = `<div class="shell"><aside class="sidebar"><div class="brand"><div class="brand-crest">${crest()}</div><div><strong>SJ Kelimelik</strong></div></div><div><div class="side-label">MENÜ</div><nav class="nav" aria-label="Ana menü">${visibleNav().map(n => navButton(n, false, counts)).join('')}</nav></div><div class="sidebar-foot"><strong>${icon('info', 14)} ${session ? esc(me?.username || '') : 'Ziyaretçi'}</strong>${footNote}</div></aside>
   <main class="main"><header class="topbar"><div class="topbar-left"><span class="mobile-crest">${crest()}</span><div class="topbar-title">SJ KELİMELİK<b>${esc(s?.name || 'Henüz sezon yok')}</b></div><span class="mobile-theme">${themeButton()}</span></div><div class="topbar-right">${themeButton()}${data.seasons.length ? `<label class="sr-only" for="seasonSwitch">Sezon</label><select id="seasonSwitch" class="small-select">${[...data.seasons].reverse().map(x => `<option value="${esc(x.id)}" ${x.id === s?.id ? 'selected' : ''}>${esc(x.name)}</option>`).join('')}</select>` : ''}${accountButton()}</div></header>
   <div class="content">${loaded ? pageContent(s) : '<div class="empty">Yükleniyor…</div>'}<div class="footer-note">SJ Kelimelik · Bağımsız topluluk uygulaması, resmî okul hizmeti değildir</div></div></main></div>
-  <nav class="mobile-nav" aria-label="Mobil menü">${visibleNav().filter(x => x[0] !== 'players').map(x => navButton(x, true, counts)).join('')}</nav><div id="modalHost"></div>`;
+  <nav class="mobile-nav" aria-label="Mobil menü">${visibleNav().filter(x => x[0] !== 'players').map(x => navButton(x, true, counts)).join('')}</nav>`;
+  tickCountdowns();
 }
 
 function pageContent(s) {
@@ -160,7 +162,7 @@ function pageContent(s) {
 
 const header = (label, title, subtitle, extra = '') => `<div class="page-header"><div><div class="eyebrow">${label}</div><h1>${title}</h1>${subtitle ? `<p>${subtitle}</p>` : ''}</div>${extra}</div>`;
 const stat = (label, value, detail) => `<div class="card stat"><div class="kicker">${label}</div><div class="num">${value}</div><div class="muted tiny">${detail}</div></div>`;
-const noSeason = () => `${header('SJ KELİMELİK', 'Henüz sezon yok', 'İlk lig veya kupa oluşturulduğunda fikstür ve puan durumu burada görünecek.')}${isAdmin() ? `<button class="btn" data-action="createSeason">${icon('plus', 16)} İlk organizasyonu oluşturun</button>` : accountNotice()}`;
+const noSeason = () => `${header('SJ KELİMELİK', 'Henüz sezon yok', 'İlk lig veya kupa oluşturulduğunda fikstür ve puan durumu burada görünecek.')}${signupCards()}${isAdmin() ? `<button class="btn" data-action="createSeason">${icon('plus', 16)} İlk organizasyonu oluşturun</button>` : accountNotice()}`;
 
 function accountNotice() {
   if (!session) return `<div class="notice mb flex between wrap"><span>Maç sonucu girmek ve onaylamak için giriş yapın. Yeni oyuncular hesap oluşturup yönetici onayı bekler.</span><span class="actions"><button class="btn small" data-action="login">Giriş yap</button><button class="btn secondary small" data-action="signup">Hesap oluştur</button></span></div>`;
@@ -168,6 +170,50 @@ function accountNotice() {
   if (me?.status === 'rejected') return `<div class="notice danger mb">Hesabınız onaylanmadı. Bir yöneticiyle iletişime geçin.</div>`;
   return '';
 }
+
+// ------------------------------------------------------------------ season sign-ups
+/* Turkey is permanently UTC+3: deadlines are shown and entered in Turkey time whatever the viewer's clock. */
+const TR_OFFSET = 3 * 3600e3;
+const trDateTime = ms => new Date(ms).toLocaleString('tr-TR', { timeZone: 'Europe/Istanbul', weekday: 'long', day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' });
+const toTrInput = ms => new Date(ms + TR_OFFSET).toISOString().slice(0, 16);
+const fromTrInput = v => new Date(v + ':00+03:00').toISOString();
+const isOpenSignup = sg => Date.now() < sg.closesAt;
+const isCumhuriyet = sg => /cumhuriyet|29 ekim/i.test(sg.title);
+const starPoints = Array.from({ length: 10 }, (_, i) => { const r = i % 2 ? 5.4 : 13.5, a = Math.PI + i * Math.PI / 5; return `${(93 + r * Math.cos(a)).toFixed(1)},${(60 + r * Math.sin(a)).toFixed(1)}`; }).join(' ');
+const crescentMark = `<svg class="flag-mark" viewBox="0 0 120 120" aria-hidden="true"><circle cx="48" cy="60" r="38" fill="#fff"/><circle cx="58" cy="60" r="30.5" fill="#d50c1a"/><polygon fill="#fff" points="${starPoints}"/></svg>`;
+
+function countdownHtml(sg) {
+  return `<div class="countdown" data-deadline="${sg.closesAt}" role="timer" aria-label="Kayıtların kapanmasına kalan süre">${[['d', 'GÜN'], ['h', 'SAAT'], ['m', 'DAKİKA'], ['s', 'SANİYE']].map(([k, label]) => `<div><b data-unit="${k}">–</b><span>${label}</span></div>`).join('')}</div>`;
+}
+function tickCountdowns() {
+  let expired = false;
+  for (const el of $$('.countdown[data-deadline]')) {
+    const left = Math.max(0, Number(el.dataset.deadline) - Date.now());
+    if (!left) expired = true;
+    const parts = { d: Math.floor(left / 864e5), h: Math.floor(left / 36e5) % 24, m: Math.floor(left / 6e4) % 60, s: Math.floor(left / 1e3) % 60 };
+    for (const [k, v] of Object.entries(parts)) { const b = el.querySelector(`[data-unit="${k}"]`); if (b) b.textContent = k === 'd' ? v : String(v).padStart(2, '0'); }
+  }
+  if (expired) render(); // switches the card to "closed"; the closed card has no countdown, so this runs once
+}
+
+function signupCard(sg) {
+  const open = isOpenSignup(sg), joined = sg.entries.some(e => e.mine), n = sg.entries.length, themed = isCumhuriyet(sg);
+  const chips = n ? `<div class="chips">${sg.entries.map(e => `<span class="chip${e.mine ? ' me' : ''}${e.approved ? '' : ' pending'}"${e.approved ? '' : ' title="Hesap onayı bekliyor"'}>${esc(e.username)}</span>`).join('')}</div>` : `<p class="signup-note">${open ? 'İlk katılan siz olun!' : 'Kimse katılmadı.'}</p>`;
+  let actions = '';
+  if (open) {
+    if (!session) actions = `<button class="btn" data-action="signupJoin" data-id="${esc(sg.id)}">Katılın ${icon('right', 15)}</button><span class="signup-note">Hesabınız yoksa birkaç saniyede oluşturabilirsiniz.</span>`;
+    else if (me?.status === 'rejected') actions = '<span class="signup-note">Hesabınız onaylanmadığı için katılamazsınız.</span>';
+    else if (joined) actions = `<span class="joined">${icon('check', 16)} Katıldınız</span><button class="btn secondary small" data-action="signupWithdraw" data-id="${esc(sg.id)}">Çekilin</button>`;
+    else actions = `<button class="btn" data-action="signupJoin" data-id="${esc(sg.id)}">Katılın ${icon('right', 15)}</button>`;
+  }
+  const admin = isAdmin() ? `<div class="actions mt admin-row"><button class="btn secondary small" data-action="editSignup" data-id="${esc(sg.id)}">Kaydı düzenleyin</button><button class="btn ${open ? 'secondary ' : ''}small" data-action="createFromSignup" data-id="${esc(sg.id)}">${icon('trophy', 14)} Turnuvayı oluşturun</button><button class="btn secondary small" data-action="closeSignup" data-id="${esc(sg.id)}">Kaydı kapatın</button></div>` : '';
+  const kicker = themed ? `CUMHURİYETİMİZİN ${new Date(sg.closesAt).getFullYear() - 1923}. YILI · TURNUVA KAYDI` : 'YENİ SEZON KAYDI';
+  return `<section class="card signup-card ${themed ? 'cumhuriyet' : 'hero'} mb">${themed ? crescentMark : ''}<div class="kicker">${kicker}</div><h2>${esc(sg.title)}</h2>
+  <p class="signup-note">${open ? `Kayıtlar <b>${esc(trDateTime(sg.closesAt))}</b>'da kapanıyor (Türkiye saati). O zamana kadar katılabilir veya çekilebilirsiniz.` : 'Kayıtlar kapandı. Fikstür yakında açıklanacak!'}</p>
+  ${open ? countdownHtml(sg) : ''}<div class="signup-count">Katılanlar (${n})</div>${chips}
+  ${actions ? `<div class="actions mt">${actions}</div>` : ''}${admin}</section>`;
+}
+const signupCards = () => (data.signups || []).map(signupCard).join('');
 
 // ------------------------------------------------------------------ pages
 function matchCard(m, s) {
@@ -204,7 +250,7 @@ function homePage(s) {
 
   if (!playing) {
     const top = [...s.players].sort((a, b) => integerRating(b) - integerRating(a)).slice(0, 5);
-    return `${header('GENEL BAKIŞ', esc(s.name), s.format === 'cup' ? 'Gruplar, eleme tablosu ve sonuçlar.' : 'Fikstür, sonuçlar ve puan durumu.', pill)}${accountNotice()}${profileNudge()}
+    return `${header('GENEL BAKIŞ', esc(s.name), s.format === 'cup' ? 'Gruplar, eleme tablosu ve sonuçlar.' : 'Fikstür, sonuçlar ve puan durumu.', pill)}${signupCards()}${accountNotice()}${profileNudge()}
     ${championCard}
     <div class="layout-2 mb"><div class="stack">${recentCard}</div><div class="stack"><div class="layout-3">${stat('OYUNCU', fmt(s.players.length), 'Bu sezonda')}${stat('TAMAMLANAN', fmt(prog.done), fmt(prog.total) + ' maçtan')}${stat('ONAY BEKLEYEN', fmt(s.matches.filter(m => m.status === 'pending' || m.status === 'disputed').length), 'Sonuç')}</div>${tableCard}
     <div class="card pad"><div class="section-title"><h2>Elo liderleri</h2><button class="linkbtn" data-nav="players">Oyuncular ${icon('right', 13)}</button></div>${top.map((id, i) => `<div class="flex between audit clickable" data-action="profile" data-id="${esc(id)}"><span><span class="rank muted">${i + 1}.</span> <b>${esc(nickname(id))}</b></span><b>${integerRating(id)}</b></div>`).join('')}</div></div></div>`;
@@ -219,7 +265,7 @@ function homePage(s) {
     ? `<div class="card hero"><div class="hero-header"><span class="kicker">Onayınızı bekleyen maç${toConfirm.length > 1 ? ` · ${toConfirm.length} adet` : ''}</span><span class="badge dark">${esc(phaseLabel(primary, s))}</span></div><div class="hero-vs"><div class="competitor"><small>${primary.a === pid ? 'SİZ' : 'RAKİBİNİZ'}</small>${esc(nickname(primary.a))}</div><span class="vs">vs</span><div class="competitor" style="text-align:right"><small>${primary.b === pid ? 'SİZ' : 'RAKİBİNİZ'}</small>${esc(nickname(primary.b))}</div></div><div class="hero-foot"><span class="hero-meta">Rakibiniz ${primary.pendingScore?.a} : ${primary.pendingScore?.b} sonucunu girdi</span><button class="btn" data-action="match" data-id="${esc(primary.id)}">Sonucu inceleyin ${icon('right', 16)}</button></div></div>`
     : `<div class="card hero"><div class="kicker">SIRADAKİ OYUNLARINIZ</div><h2>${open.length ? `${fmt(open.length)} maçınız oynanmayı bekliyor` : 'Şimdilik oynanacak maçınız yok.'}</h2><p class="hero-meta">${open.length ? 'Sıra yok: maçlarınızı istediğiniz sırayla oynayın, biten maçın sonucunu girin.' : 'Tamamladığınız maçları fikstürden inceleyebilirsiniz.'}</p>${open.length ? `<div class="hero-foot"><span class="hero-meta">${fmt(ownDone)} / ${fmt(list.length)} maç tamamlandı</span><button class="btn" data-action="myMatches">Maçlarım ${icon('right', 16)}</button></div>` : ''}</div>`;
   const upcomingCard = `<div class="card pad"><div class="section-title"><h2>Sıradaki oyunlarınız</h2><button class="linkbtn" data-action="myMatches">Tümü${upcoming.length ? ` (${upcoming.length})` : ''} ${icon('right', 13)}</button></div><div class="match-list">${upcoming.length ? upcoming.slice(0, 8).map(m => matchCard(m, s)).join('') : '<div class="empty">Başka maç bulunmuyor.</div>'}</div></div>`;
-  return `${header('GENEL BAKIŞ', 'Hoş geldiniz, ' + esc(me.username) + '!', 'Sezonla ilgili gelişmeleri buradan takip edebilirsiniz.', pill)}${profileNudge()}${championCard}
+  return `${header('GENEL BAKIŞ', 'Hoş geldiniz, ' + esc(me.username) + '!', 'Sezonla ilgili gelişmeleri buradan takip edebilirsiniz.', pill)}${signupCards()}${profileNudge()}${championCard}
   <div class="layout-2 mb"><div class="stack">${hero}${upcomingCard}${recentCard}</div>
   <div class="stack"><div class="layout-3">${stat('ELO PUANINIZ', fmt(integerRating(pid)), 'Başlangıç: 1000')}${stat('SIRALAMANIZ', rank ? '#' + rank : '−', s.format === 'cup' ? 'Grup sırası' : 'Lig sırası')}${stat('MAÇLARINIZ', fmt(ownDone), fmt(list.length) + ' toplam')}</div>${tableCard}</div></div>`;
 }
@@ -287,7 +333,7 @@ function seasonsPage() {
     : me?.status === 'approved' ? '<p>Hesabınız onaylı. Yöneticiler yeni sezonu oluştururken kadroya sizi ekleyebilir.</p>'
     : '<p>Hesabınız onaylanmadı. Bir yöneticiyle iletişime geçin.</p>';
   return `${header('TOPLULUK', 'Sezonlar ve katılım', 'Ligler, kupalar ve geçmiş sezonlar aynı yerde korunur.', isAdmin() ? `<button class="btn" data-action="createSeason">${icon('plus', 16)} Yeni organizasyon</button>` : '')}
-  <div class="register-cover mb"><div class="card special"><div class="eyebrow">KATILIM</div><h2>Bir sonraki sezona katılın.</h2>${join}</div><div class="card pad"><div class="section-title"><h2>Topluluk</h2>${icon('users')}</div><div class="flex between"><b>Toplam oyuncu</b><b>${data.players.length}</b></div><div class="flex between mt"><b>Kaydedilen sezon</b><b>${data.seasons.length}</b></div><div class="flex between mt"><b>Tamamlanan maç</b><b>${fmt(allMatches().filter(m => m.status === 'done').length)}</b></div></div></div>
+  ${signupCards()}<div class="register-cover mb"><div class="card special"><div class="eyebrow">KATILIM</div><h2>Bir sonraki sezona katılın.</h2>${join}</div><div class="card pad"><div class="section-title"><h2>Topluluk</h2>${icon('users')}</div><div class="flex between"><b>Toplam oyuncu</b><b>${data.players.length}</b></div><div class="flex between mt"><b>Kaydedilen sezon</b><b>${data.seasons.length}</b></div><div class="flex between mt"><b>Tamamlanan maç</b><b>${fmt(allMatches().filter(m => m.status === 'done').length)}</b></div></div></div>
   <div class="section-title"><h2>Sezon arşivi</h2></div><div class="season-list">${data.seasons.length ? [...data.seasons].reverse().map(s => { const x = seasonProgress(s); return `<div class="card season-item"><div><strong>${esc(s.name)}</strong><div class="muted">${s.format === 'league' ? (s.legs === 1 ? 'Tek devre' : 'Çift devre') + ' / lig' : 'Grup + eleme / kupa'} · ${s.players.length} oyuncu · ${x.done}/${x.total} maç</div></div><div class="actions"><span class="badge ${s.status === 'finished' ? 'green' : 'gold'}">${s.status === 'finished' ? 'Tamamlandı' : 'Devam ediyor'}</span><button class="btn secondary small" data-action="selectSeason" data-id="${esc(s.id)}">Aç ${icon('right', 14)}</button></div></div>`; }).join('') : '<div class="empty">Henüz sezon yok.</div>'}</div>`;
 }
 
@@ -300,11 +346,11 @@ function adminPage(s) {
   return `${header('YÖNETİM', 'Yönetici paneli', 'Hesaplar, müsabakalar ve sonuç incelemeleri.', `<button class="btn" data-action="createSeason">${icon('plus', 16)} Yeni organizasyon</button>`)}
   <div class="layout-3 mb">${stat('ONAY BEKLEYEN', pending.length, 'Hesap başvurusu')}${stat('SONUÇ İŞLEMLERİ', issues.length, 'Onay veya itiraz')}${stat('TAMAMLANAN', s ? completedCount(s) : 0, 'Bu sezondaki maçlar')}</div>
   <div class="layout-2 mb"><div class="stack">
-   <div class="card pad"><div class="section-title"><h2>Hesap başvuruları</h2><span class="badge">${pending.length} bekleyen</span></div>${pending.length ? pending.map(p => `<div class="season-item row-line"><div><strong>${esc(p.username)}</strong><div class="tiny muted">${p.real_name ? esc(p.real_name) + ' · ' : ''}${longDate(p.created_at)}</div></div><div class="actions"><button class="btn soft small" data-action="approveProfile" data-id="${esc(p.id)}">Onayla</button><button class="btn secondary small" data-action="rejectProfile" data-id="${esc(p.id)}">Reddet</button></div></div>`).join('') : '<div class="empty">Yeni başvuru bulunmuyor.</div>'}</div>
+   <div class="card pad"><div class="section-title"><h2>Hesap başvuruları</h2><span class="badge">${pending.length} bekleyen</span></div>${pending.length ? pending.map(p => `<div class="season-item row-line"><div><strong>${esc(p.username)}</strong> ${(data.signups || []).some(sg => sg.entries.some(e => e.username === p.username)) ? '<span class="badge gold">Turnuvaya kayıtlı</span>' : ''}<div class="tiny muted">${p.real_name ? esc(p.real_name) + ' · ' : ''}${longDate(p.created_at)}</div></div><div class="actions"><button class="btn soft small" data-action="approveProfile" data-id="${esc(p.id)}">Onayla</button><button class="btn secondary small" data-action="rejectProfile" data-id="${esc(p.id)}">Reddet</button></div></div>`).join('') : '<div class="empty">Yeni başvuru bulunmuyor.</div>'}</div>
    <div class="card pad"><div class="section-title"><h2>Sonuç onayları ve itirazlar</h2><span class="badge gold">${issues.length}</span></div><div class="match-list">${issues.length ? issues.map(([m, x]) => matchCard(m, x)).join('') : '<div class="empty">İncelenecek maç bulunmuyor.</div>'}</div></div>
    <div class="card pad"><div class="section-title"><h2>Üyeler</h2><span class="actions"><span class="badge">${members.length}</span><button class="btn secondary small" data-action="toggleMembers" aria-expanded="${membersOpen}">${membersOpen ? 'Gizle' : 'Göster'}</button></span></div>${membersOpen ? members.map(p => `<div class="season-item row-line"><div><strong>${esc(p.username)}</strong> ${p.is_admin ? '<span class="badge blue">Yönetici</span>' : ''}<div class="tiny muted">${[p.real_name, p.grad_year && p.grad_year + ' mezunu'].filter(Boolean).map(esc).join(' · ') || 'Bilgi girilmedi'}</div></div><button class="btn secondary small" data-action="manageMember" data-id="${esc(p.id)}">Yönet</button></div>`).join('') : '<p class="muted tiny mb0">Yetki ve şifre işlemleri için listeyi açıp bir üyeyi seçin.</p>'}</div>
   </div>
-  <div class="stack"><div class="card pad"><h2 style="margin-top:0">Sezon işlemleri</h2>${s ? `<p class="muted">Aktif sezon: <b>${esc(s.name)}</b></p>` : ''}<div class="stack">${groupDone ? `<button class="btn block" data-action="createBracket">${icon('trophy', 16)} Eleme tablosunu oluşturun</button>` : ''}<button class="btn secondary block" data-action="addPlayer">${icon('plus', 16)} Hesapsız oyuncu ekleyin</button><button class="btn secondary block" data-action="exportData">JSON yedeğini dışa aktarın</button>${s ? `<button class="btn secondary block danger-text" data-action="deleteSeason" data-id="${esc(s.id)}">Bu sezonu silin</button>` : ''}</div></div>
+  <div class="stack"><div class="card pad"><h2 style="margin-top:0">Sezon işlemleri</h2>${s ? `<p class="muted">Aktif sezon: <b>${esc(s.name)}</b></p>` : ''}<div class="stack">${groupDone ? `<button class="btn block" data-action="createBracket">${icon('trophy', 16)} Eleme tablosunu oluşturun</button>` : ''}<button class="btn secondary block" data-action="newSignup">${icon('calendar', 16)} Sezon kaydı açın</button><button class="btn secondary block" data-action="addPlayer">${icon('plus', 16)} Hesapsız oyuncu ekleyin</button><button class="btn secondary block" data-action="exportData">JSON yedeğini dışa aktarın</button>${s ? `<button class="btn secondary block danger-text" data-action="deleteSeason" data-id="${esc(s.id)}">Bu sezonu silin</button>` : ''}</div></div>
   <div class="card pad"><div class="section-title"><h2>Son işlemler</h2>${icon('archive', 17)}</div>${data.audits.length ? data.audits.slice(0, 12).map(a => `<div class="audit"><div class="audit-label">${esc(a.action)}</div><div class="muted">${esc(a.actor_name || 'Sistem')} · ${longDate(a.at)}</div></div>`).join('') : '<div class="empty">Henüz işlem yok.</div>'}</div></div></div>`;
 }
 
@@ -317,7 +363,7 @@ const formActions = (label, cancel = 'Vazgeç') => `<div class="form-actions"><b
 function openAuth(mode = 'login') {
   const signup = mode === 'signup';
   modal(`${modalHeader(signup ? 'Hesap oluşturun' : 'Giriş yapın', signup ? 'Yönetici onayından sonra maç sonuçlarını girebilirsiniz.' : 'Kullanıcı adınız ve şifrenizle.')}
-  <div class="tabs mb"><button type="button" class="tab ${signup ? '' : 'active'}" data-action="login">Giriş</button><button type="button" class="tab ${signup ? 'active' : ''}" data-action="signup">Yeni hesap</button></div>
+  ${joinAfterAuth ? `<div class="notice mb">${signup ? 'Hesabınızı oluşturunca' : 'Giriş yapınca'} turnuvaya otomatik katılacaksınız.</div>` : ''}<div class="tabs mb"><button type="button" class="tab ${signup ? '' : 'active'}" data-action="login">Giriş</button><button type="button" class="tab ${signup ? 'active' : ''}" data-action="signup">Yeni hesap</button></div>
   <form id="${signup ? 'signupForm' : 'loginForm'}"><div class="stack">
    <div class="field"><label for="authUser">Kullanıcı adı</label><input class="input" id="authUser" name="username" autocomplete="username" autocapitalize="none" spellcheck="false" required maxlength="20">${signup ? `<small>Herkese bu ad görünür. Kelimelik kullanıcı adınızı kullanabilirsiniz. ${USERNAME_RULE}</small>` : ''}</div>
    ${signup ? '<div class="field"><label for="authName">Gerçek ad (isteğe bağlı)</label><input class="input" id="authName" name="realName" autocomplete="name" maxlength="80"><small>Yalnızca onaylı üyeler görür.</small></div>' + yearField('authYear') : ''}
@@ -355,14 +401,14 @@ function openMatch(id) {
   modal(`${modalHeader('Maç ayrıntısı', esc(s.name) + ' · ' + esc(phaseLabel(m, s)))}<div class="flex between mb"><b>${esc(nickname(m.a))} <span class="muted">vs</span> ${esc(nickname(m.b))}</b>${statusBadge(m.status)}</div>${body}`);
 }
 
-function openCreateSeason() {
+function openCreateSeason(prefill = {}) {
   if (!isAdmin()) return notify('Yönetici yetkisi gerekiyor.');
   const players = [...data.players].sort((a, b) => a.username.localeCompare(b.username, 'tr'));
   if (players.length < 4) return notify('Organizasyon için en az 4 oyuncu gerekiyor. Önce hesapları onaylayın veya oyuncu ekleyin.');
   const year = new Date().getFullYear();
   modal(`${modalHeader('Yeni organizasyon oluşturun', 'Biçimi seçin, oyuncuları belirleyin, fikstür otomatik oluşturulsun.')}
-  <form id="newSeasonForm"><div class="formgrid mb"><div class="field"><label for="seasonName">Organizasyon adı</label><input class="input" id="seasonName" name="name" minlength="3" maxlength="70" required value="${year} Ligi"></div><div class="field"><label for="format">Oyun biçimi</label><select class="select" name="format" id="format"><option value="league" selected>Lig, herkes herkesle</option><option value="cup">Kupa, gruplar + eleme</option></select></div><div class="field" id="legsWrap"><label for="legs">Karşılaşma sayısı</label><select class="select" name="legs" id="legs"><option value="2" selected>İki devre</option><option value="1">Tek devre</option></select></div><div class="field" id="seedWrap" style="display:none"><label for="seedStrategy">Grup oluşturma</label><select class="select" name="seedStrategy" id="seedStrategy"><option value="pots">Elo torbaları, dengeli gruplar</option><option value="bands">Yakın Elo, denk rakipler</option><option value="random">Rastgele kura</option></select></div><div class="field" id="sizeWrap" style="display:none"><label for="groupSize">Hedef grup büyüklüğü</label><select class="select" id="groupSize" name="groupSize"><option value="4">4 kişi</option><option value="5" selected>5 kişi</option><option value="6">6 kişi</option></select></div></div>
-  <div class="section-title"><h2>Katılacak oyuncular</h2><button type="button" class="linkbtn" data-action="toggleRoster">Tümünü seç / kaldır</button></div><p class="muted tiny">En az 4 oyuncu seçin. Fikstür oluşturulduktan sonra kadro değiştirilemez.</p><div class="roster" id="roster">${players.map(p => `<label class="check"><input type="checkbox" name="players" value="${esc(p.id)}" checked> ${esc(p.username)}</label>`).join('')}</div>${formActions('Fikstürü oluşturun ' + icon('right', 16), 'İptal')}</form>`, true);
+  <form id="newSeasonForm"><input type="hidden" name="signupId" value="${esc(prefill.signupId || '')}">${prefill.ids ? `<div class="notice mb">Kayıt listesindeki ${prefill.ids.length} onaylı oyuncu seçili.${prefill.pending?.length ? ` Onay bekleyen kayıtlılar: <b>${prefill.pending.map(esc).join(', ')}</b>. Kadroya almak için önce Yönetim → Hesap başvuruları'ndan onaylayın, sonra bu pencereyi yeniden açın.` : ''}</div>` : ''}<div class="formgrid mb"><div class="field"><label for="seasonName">Organizasyon adı</label><input class="input" id="seasonName" name="name" minlength="3" maxlength="70" required value="${esc(prefill.name || year + ' Ligi')}"></div><div class="field"><label for="format">Oyun biçimi</label><select class="select" name="format" id="format"><option value="league" selected>Lig, herkes herkesle</option><option value="cup">Kupa, gruplar + eleme</option></select></div><div class="field" id="legsWrap"><label for="legs">Karşılaşma sayısı</label><select class="select" name="legs" id="legs"><option value="2" selected>İki devre</option><option value="1">Tek devre</option></select></div><div class="field" id="seedWrap" style="display:none"><label for="seedStrategy">Grup oluşturma</label><select class="select" name="seedStrategy" id="seedStrategy"><option value="pots">Elo torbaları, dengeli gruplar</option><option value="bands">Yakın Elo, denk rakipler</option><option value="random">Rastgele kura</option></select></div><div class="field" id="sizeWrap" style="display:none"><label for="groupSize">Hedef grup büyüklüğü</label><select class="select" id="groupSize" name="groupSize"><option value="4">4 kişi</option><option value="5" selected>5 kişi</option><option value="6">6 kişi</option></select></div></div>
+  <div class="section-title"><h2>Katılacak oyuncular</h2><button type="button" class="linkbtn" data-action="toggleRoster">Tümünü seç / kaldır</button></div><p class="muted tiny">En az 4 oyuncu seçin. Fikstür oluşturulduktan sonra kadro değiştirilemez.</p><div class="roster" id="roster">${players.map(p => `<label class="check"><input type="checkbox" name="players" value="${esc(p.id)}" ${!prefill.ids || prefill.ids.includes(p.id) ? 'checked' : ''}> ${esc(p.username)}</label>`).join('')}</div>${formActions('Fikstürü oluşturun ' + icon('right', 16), 'İptal')}</form>`, true);
 }
 
 function openAddPlayer() {
@@ -393,6 +439,13 @@ function openEditPlayer(id) {
   <form id="editPlayerForm"><input type="hidden" name="player" value="${esc(p.id)}"><div class="stack"><div class="field"><label for="epName">Gerçek ad</label><input class="input" id="epName" name="realName" maxlength="80" value="${esc(p.realName || '')}"></div>${yearField('epYear', p.gradYear)}</div>${formActions('Kaydedin')}</form>`);
 }
 
+function openSignupForm(id) {
+  const sg = id && data.signups.find(x => x.id === id);
+  const deadline = sg ? toTrInput(sg.closesAt) : toTrInput(Date.now() + 7 * 864e5).slice(0, 10) + 'T23:59';
+  modal(`${modalHeader(sg ? 'Kaydı düzenleyin' : 'Sezon kaydı açın', 'Üyeler son tarihe kadar katılabilir veya çekilebilir.')}
+  <form id="signupWindowForm"><input type="hidden" name="signup" value="${esc(sg?.id || '')}"><div class="stack"><div class="field"><label for="swTitle">Turnuva adı</label><input class="input" id="swTitle" name="title" minlength="3" maxlength="70" required value="${esc(sg?.title || '')}" placeholder="ör. 2027 Bahar Ligi"></div><div class="field"><label for="swClose">Son kayıt (Türkiye saati)</label><input class="input" id="swClose" name="closesAt" type="datetime-local" required value="${deadline}"></div></div>${formActions('Kaydedin')}</form>`);
+}
+
 function openResetPassword(id) {
   const p = data.profiles.find(x => x.id === id); if (!p) return;
   const suggestion = Array.from(crypto.getRandomValues(new Uint32Array(10)), n => 'abcdefghjkmnpqrstuvwxyz23456789'[n % 31]).join('');
@@ -418,7 +471,7 @@ function downloadData() {
 // ------------------------------------------------------------------ events
 function action(name, id) {
   switch (name) {
-    case 'closeModal': return closeModal();
+    case 'closeModal': joinAfterAuth = null; return closeModal();
     case 'toggleTheme': return toggleTheme();
     case 'login': return openAuth('login');
     case 'signup': return openAuth('signup');
@@ -437,6 +490,19 @@ function action(name, id) {
     case 'toggleAdminRole': { const p = data.profiles.find(x => x.id === id); return p && confirm(p.is_admin ? `${p.username} yöneticilikten çıkarılsın mı?` : `${p.username} yönetici yapılsın mı? Tüm yönetici işlemlerini yapabilecek.`) && run(() => api.adminSetAdmin(id, !p.is_admin), 'Yetki güncellendi.'); }
     case 'resetPassword': return openResetPassword(id);
     case 'manageMember': return openMember(id);
+    case 'signupJoin':
+      if (!session) { joinAfterAuth = id; return openAuth('signup'); }
+      return run(() => api.signupJoin(id), () => me?.status === 'approved' ? 'Turnuvaya katıldınız!' : 'Turnuvaya katıldınız! Hesabınız onaylanınca kadroya eklenebilirsiniz.');
+    case 'signupWithdraw': return confirm('Turnuva kaydınızı geri çekmek istiyor musunuz?') && run(() => api.signupWithdraw(id), 'Kaydınız geri çekildi.');
+    case 'newSignup': return openSignupForm(null);
+    case 'editSignup': return openSignupForm(id);
+    case 'closeSignup': return confirm('Kayıt kapatılsın mı? Kart sayfadan kalkar; katılım listesi saklanır.') && run(() => api.adminCloseSignup(id, null), 'Kayıt kapatıldı.');
+    case 'createFromSignup': {
+      const sg = data.signups.find(x => x.id === id);
+      if (!sg) return;
+      if (isOpenSignup(sg) && !confirm('Kayıtlar henüz açık. Yine de turnuvayı şimdi oluşturmak istiyor musunuz?')) return;
+      return openCreateSeason({ name: sg.title, ids: sg.entries.filter(e => e.playerId).map(e => e.playerId), signupId: sg.id, pending: sg.entries.filter(e => !e.approved).map(e => e.username) });
+    }
     case 'editPlayer': return openEditPlayer(id);
     case 'myMatches': view = 'fixtures'; fixtureFilter = 'mine'; fixturePlayer = 'all'; render(); return window.scrollTo({ top: 0, behavior: 'instant' });
     case 'toggleMembers': membersOpen = !membersOpen; return render();
@@ -459,6 +525,14 @@ function action(name, id) {
   }
 }
 
+let joinedNote = '';
+async function joinPendingSignup() {
+  joinedNote = '';
+  if (!joinAfterAuth) return;
+  const id = joinAfterAuth; joinAfterAuth = null;
+  try { await api.signupJoin(id); joinedNote = 'Turnuvaya katıldınız!'; } catch (e) { joinedNote = 'Turnuvaya katılamadınız: ' + e.message; }
+}
+
 function handleSubmit(e) {
   const f = e.target;
   if (!f.id) return;
@@ -467,14 +541,15 @@ function handleSubmit(e) {
   const year = () => { const t = str('gradYear'); if (!t) return null; const n = Number(t); if (!Number.isInteger(n) || n < 1950 || n > 2040) throw Error('Mezuniyet yılı 1950 ile 2040 arasında olmalı (ör. 2015).'); return n; };
   try {
     if (f.id === 'loginForm') {
-      return run(async () => { session = await api.signIn(str('username'), String(d.get('password'))); }, () => 'Hoş geldiniz, ' + (me?.username || '') + '!');
+      return run(async () => { session = await api.signIn(str('username'), String(d.get('password'))); await joinPendingSignup(); }, () => 'Hoş geldiniz, ' + (me?.username || '') + '!' + (joinedNote ? ' ' + joinedNote : ''));
     }
     if (f.id === 'signupForm') {
       const username = normalizeUsername(str('username'));
       if (!validUsername(username)) throw Error('Kullanıcı adı geçersiz. ' + USERNAME_RULE);
       if (String(d.get('password')).length < 8) throw Error('Şifre en az 8 karakter olmalı.');
       if (d.get('password') !== d.get('password2')) throw Error('Şifreler eşleşmiyor.');
-      return run(async () => { session = await api.signUp(username, String(d.get('password')), str('realName'), year()); }, 'Hesabınız oluşturuldu. Yönetici onayından sonra sonuç girebilirsiniz.');
+      const y = year();
+      return run(async () => { session = await api.signUp(username, String(d.get('password')), str('realName'), y); await joinPendingSignup(); }, () => 'Hesabınız oluşturuldu.' + (joinedNote ? ' ' + joinedNote : ' Yönetici onayından sonra sonuç girebilirsiniz.'));
     }
     if (f.id === 'accountForm') { const y = year(); return run(() => api.updateMyProfile(str('realName'), y), 'Bilgileriniz kaydedildi.'); }
     if (f.id === 'editPlayerForm') { const y = year(); return run(() => api.adminUpdatePlayer(str('player'), str('realName'), y), 'Oyuncu bilgileri kaydedildi.'); }
@@ -484,6 +559,12 @@ function handleSubmit(e) {
       if (!Number.isInteger(a) || !Number.isInteger(b) || a < 0 || b < 0 || a > 9999 || b > 9999) throw Error('0 ile 9999 arasında tam sayı girin.');
       const id = str('match');
       return d.get('override') ? run(() => api.adminSetScore(id, a, b), 'Resmî sonuç kaydedildi.') : run(() => api.submitScore(id, a, b), 'Sonuç rakibinizin onayına gönderildi.');
+    }
+    if (f.id === 'signupWindowForm') {
+      const title = str('title'), at = str('closesAt');
+      if (title.length < 3) throw Error('Turnuva adı en az üç karakter olmalı.');
+      if (!at) throw Error('Son kayıt zamanını girin.');
+      return run(() => api.adminSaveSignup(str('signup') || null, title, fromTrInput(at)), 'Kayıt kaydedildi.');
     }
     if (f.id === 'approveForm') return run(() => api.approveProfile(str('profile'), str('player') || null), 'Hesap onaylandı.');
     if (f.id === 'resetForm') return run(() => api.adminResetPassword(str('profile'), String(d.get('password'))), 'Şifre değiştirildi. Yeni şifreyi kişiye iletin.');
@@ -501,7 +582,7 @@ function handleSubmit(e) {
       const format = d.get('format') === 'cup' ? 'cup' : 'league', legs = Number(d.get('legs')) === 1 ? 1 : 2, size = Number(d.get('groupSize')) || 5;
       const strategy = ['pots', 'bands', 'random'].includes(d.get('seedStrategy')) ? String(d.get('seedStrategy')) : 'pots';
       const plan = planSeason({ format, ids, legs, strategy, size, eloMap: elo() });
-      return run(async () => { const sid = await api.adminCreateSeason({ name, format, legs, strategy, ids, plan }); rememberSeason(sid); view = 'fixtures'; fixtureFilter = 'all'; fixturePlayer = 'all'; },
+      return run(async () => { const sid = await api.adminCreateSeason({ name, format, legs, strategy, ids, plan }); if (str('signupId')) await api.adminCloseSignup(str('signupId'), sid); rememberSeason(sid); view = 'fixtures'; fixtureFilter = 'all'; fixturePlayer = 'all'; },
         `Yeni ${format === 'league' ? 'lig' : 'kupa'} fikstürü oluşturuldu: ${plan.matches.length} maç.`);
     }
   } catch (err) { notify(err.message || 'İşlem tamamlanamadı.'); }
@@ -511,7 +592,7 @@ function change(e) {
   const t = e.target;
   if (t.id === 'seasonSwitch') { rememberSeason(t.value); fixturePlayer = 'all'; render(); }
   else if (t.id === 'playerSelect') { fixturePlayer = t.value; render(); }
-  else if (t.id === 'format') { const cup = t.value === 'cup'; $('#legsWrap').style.display = cup ? 'none' : ''; $('#seedWrap').style.display = cup ? '' : 'none'; $('#sizeWrap').style.display = cup ? '' : 'none'; $('#seasonName').value = new Date().getFullYear() + (cup ? ' Kupası' : ' Ligi'); }
+  else if (t.id === 'format') { const cup = t.value === 'cup'; $('#legsWrap').style.display = cup ? 'none' : ''; $('#seedWrap').style.display = cup ? '' : 'none'; $('#sizeWrap').style.display = cup ? '' : 'none'; if (!$('#newSeasonForm input[name=signupId]')?.value) $('#seasonName').value = new Date().getFullYear() + (cup ? ' Kupası' : ' Ligi'); }
 }
 
 function setupPage() {
@@ -526,11 +607,11 @@ async function start() {
     if (filter) { fixtureFilter = filter.dataset.filter; fixturePlayer = 'all'; render(); return; }
     const button = e.target.closest('[data-action]');
     if (button) { action(button.dataset.action, button.dataset.id); return; }
-    if (e.target.id === 'overlay') closeModal();
+    if (e.target.id === 'overlay') { joinAfterAuth = null; closeModal(); }
   });
   document.addEventListener('submit', handleSubmit);
   document.addEventListener('change', change);
-  document.addEventListener('keydown', e => { if (e.key === 'Escape') closeModal(); });
+  document.addEventListener('keydown', e => { if (e.key === 'Escape') { joinAfterAuth = null; closeModal(); } });
   if (!api.configured) return setupPage();
   render();
   try {
@@ -544,6 +625,12 @@ async function start() {
     try { await refresh(); } catch (e) { notify(e.message); }
   });
   api.subscribe(() => { if (!busy) refresh().catch(console.error); });
+  setInterval(tickCountdowns, 1000);
+  setInterval(async () => {
+    if (!data.signups?.length || busy || document.visibilityState !== 'visible') return;
+    try { const next = await api.loadSignups(); if (JSON.stringify(next) !== JSON.stringify(data.signups)) { data.signups = next; render(); } }
+    catch (e) { console.error(e); }
+  }, 30000);
   setInterval(async () => {
     if (!isAdmin() || busy || document.visibilityState !== 'visible') return;
     try { if (await api.pendingProfileCount() !== data.profiles.filter(p => p.status === 'pending').length) await refresh(); }

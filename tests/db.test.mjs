@@ -266,3 +266,35 @@ test('usernames with single spaces sign up; leading, trailing and double spaces 
   }
   await assert.rejects(signup('ali veli'), /duplicate|unique/i, 'case-insensitive with spaces too');
 });
+
+test('signups: join / withdraw until the deadline, enforced by the database; list is public usernames only', async () => {
+  const seeded = (await db.query(`select title, closes_at from public.signups`)).rows;
+  assert.ok(seeded.some(r => r.title === '29 Ekim Cumhuriyet Turnuvası' && new Date(r.closes_at).toISOString() === '2026-10-28T20:59:00.000Z'),
+    'the Cumhuriyet signup is seeded for 28 Oct 23:59 Turkey time');
+
+  await assert.rejects(rpc(u.mehmet, 'admin_save_signup', [null, 'Test Kaydı', new Date(Date.now() + 3600e3).toISOString()]), /yönetici/);
+  const sg = await rpc(u.alp, 'admin_save_signup', [null, 'Test Kaydı', new Date(Date.now() + 3600e3).toISOString()]);
+  await assert.rejects(rpc(null, 'signup_join', [sg]), /permission denied/);
+  await rpc(u.mehmet, 'signup_join', [sg]);
+  await rpc(u.mehmet, 'signup_join', [sg]); // joining twice is harmless
+  await rpc(u['Ayşe'], 'signup_join', [sg]);
+  const pending = await signup('yeni_gelen');
+  await rpc(pending, 'signup_join', [sg]); // newcomers can join before approval
+  await assert.rejects(rpc(u.zeynep, 'signup_join', [sg]), /onaylanmadı/, 'rejected accounts cannot join');
+
+  const list = await as(null, 'select * from public.signup_list($1)', [sg]);
+  assert.deepEqual(list.map(r => [r.username, r.approved, r.mine]), [['mehmet', true, false], ['Ayşe', true, false], ['yeni_gelen', false, false]]);
+  assert.ok(list[0].player_id && !list[2].player_id, 'approved entries carry their player id');
+  assert.equal((await as(u.mehmet, 'select mine from public.signup_list($1) where username = $2', [sg, 'mehmet']))[0].mine, true);
+  assert.equal((await as(null, 'select * from public.signup_entries')).length, 0, 'raw entries (account ids) stay private');
+
+  await rpc(u['Ayşe'], 'signup_withdraw', [sg]);
+  assert.equal((await as(null, 'select * from public.signup_list($1)', [sg])).length, 2);
+
+  await db.query(`update public.signups set closes_at = now() - interval '1 second' where id = $1`, [sg]);
+  await assert.rejects(rpc(u['Ayşe'], 'signup_join', [sg]), /kapandı/);
+  await assert.rejects(rpc(u.mehmet, 'signup_withdraw', [sg]), /kapandı/);
+
+  await rpc(u.alp, 'admin_close_signup', [sg, null]);
+  assert.equal((await db.query('select status from public.signups where id=$1', [sg])).rows[0].status, 'closed');
+});
