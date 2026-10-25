@@ -211,3 +211,64 @@ body.busy .modal button[type=submit],body.busy [data-action=confirmMatch],body.b
 .joined{display:inline-flex;gap:6px;align-items:center;font-weight:800}
 .admin-row{border-top:1px solid #ffffff33;padding-top:12px}
 @media(max-width:720px){.signup-card{padding:20px}.countdown div{min-width:0;flex:1}.countdown b{font-size:24px}}
+
+/* Home layout v2: compact head, one row of numbers, then content in reading order.
+   Grid areas keep the standings pinned on the right on desktop and put them between
+   "next games" and "recent results" on phones. */
+.stack{align-content:start}
+.layout-2{align-items:start}
+.home-head{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:16px}
+.home-head h1{font-size:clamp(22px,2.4vw,30px);letter-spacing:-.8px;margin:4px 0 0;line-height:1.15}
+.home-head .season-pill{padding:7px 11px;font-size:11px}
+.stat-strip{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin-bottom:16px}
+.mini-stat{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:12px 14px;min-width:0}
+.mini-stat .kicker{font-size:10px;letter-spacing:.8px;display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.mini-stat b{display:block;font-size:24px;letter-spacing:-.6px;line-height:1.15;margin-top:3px;font-variant-numeric:tabular-nums}
+.mini-stat small{font-size:13px;color:var(--muted);font-weight:600;letter-spacing:0}
+.home-grid{display:grid;grid-template-columns:minmax(0,1.5fr) minmax(300px,1fr);grid-template-rows:auto 1fr;grid-template-areas:"main side" "recent side";gap:16px;align-items:start}
+.area-main{grid-area:main;min-width:0}
+.area-recent{grid-area:recent;min-width:0}
+.area-side{grid-area:side;min-width:0;position:sticky;top:16px}
+.action-card{border-color:var(--gold);box-shadow:0 0 0 1px var(--gold) inset,var(--shadow)}
+.section-title h2 .count{font-size:13px;font-weight:700;color:var(--muted);margin-left:4px;letter-spacing:0}
+.progress-line{display:grid;gap:8px;margin-top:14px}
+.progress-line .track{height:6px}
+/* denser match rows */
+.match-list{gap:6px}
+.match-row{padding:10px 14px;gap:12px;border-radius:11px}
+.match-main{flex:1;min-width:0}
+.match-row .title{font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.match-row .meta{margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.match-row .result{font-size:15px}
+.match-right{gap:8px}
+.match-right svg{color:var(--muted)}
+@media(min-width:1180px){.match-list.two-col{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:900px){
+ .home-grid{grid-template-columns:1fr;grid-template-rows:none;grid-template-areas:"main" "side" "recent"}
+ .area-side{position:static}
+}
+@media(max-width:720px){
+ .home-head{margin-bottom:12px}
+ .home-head h1{font-size:22px}
+ .stat-strip{gap:6px;margin-bottom:12px}
+ .mini-stat{padding:9px 10px;border-radius:12px}
+ .mini-stat .kicker{font-size:9px;letter-spacing:.5px}
+ .mini-stat b{font-size:19px}
+ .mini-stat small{font-size:11px}
+ .match-row{padding:10px 12px}
+}
+/* Desktop: countdown beside the text, so the registration card stays short. */
+@media(min-width:900px){
+ .signup-card{display:grid;grid-template-columns:minmax(0,1fr) auto;column-gap:32px;align-items:center;padding:22px 26px}
+ .signup-card > *{grid-column:1}
+ .signup-card > .countdown{grid-column:2;grid-row:1 / span 4;margin:0;align-self:center}
+ .signup-card .countdown div{min-width:74px;padding:12px 8px}
+ .signup-card .countdown b{font-size:32px}
+ .signup-card .signup-count{margin-top:12px}
+}
+.signup-card h2{line-height:1.15}
+@media(min-width:900px) and (max-width:1150px){
+ .signup-card .countdown{gap:7px}
+ .signup-card .countdown div{min-width:60px;padding:10px 6px}
+ .signup-card .countdown b{font-size:26px}
+}

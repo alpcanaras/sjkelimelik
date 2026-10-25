@@ -68,6 +68,7 @@ const ready = (async () => {
 })();
 
 export const configured = true;
+export const features = { details: true, signups: true };
 export const crestUrl = 'assets/saint-joseph-crest-cropped.png';
 
 export async function getSession() { await ready; return uid ? { user: { id: uid } } : null; }

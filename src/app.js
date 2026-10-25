@@ -27,8 +27,8 @@ const nickname = id => player(id)?.username || 'Belirlenecek';
 const gradLabel = y => (y ? `'${String(y).slice(-2)}` : '');
 const personDetails = p => [p?.realName, gradLabel(p?.gradYear)].filter(Boolean).join(' ');
 const nameCell = id => { const d = personDetails(player(id)); return `<span class="name-stack">${esc(nickname(id))}${d ? `<span class="person-sub">${esc(d)}</span>` : ''}</span>`; };
-const yearField = (id, value) => `<div class="field"><label for="${id}">Mezuniyet yılı (isteğe bağlı)</label><input class="input" id="${id}" name="gradYear" type="number" inputmode="numeric" min="1950" max="2040" placeholder="ör. 2015" value="${esc(value || '')}"></div>`;
-const missingDetails = () => me?.status === 'approved' && (!me.real_name || !me.grad_year);
+const yearField = (id, value) => !api.features.details ? '' : `<div class="field"><label for="${id}">Mezuniyet yılı (isteğe bağlı)</label><input class="input" id="${id}" name="gradYear" type="number" inputmode="numeric" min="1950" max="2040" placeholder="ör. 2015" value="${esc(value || '')}"></div>`;
+const missingDetails = () => api.features.details && me?.status === 'approved' && (!me.real_name || !me.grad_year);
 const profileNudge = () => missingDetails() ? `<div class="notice mb flex between wrap"><span>${icon('user', 15)} Profilinizi tamamlayın: gerçek adınızı ve mezuniyet yılınızı ekleyin, üyeler sizi tanısın.</span><button class="btn small" data-action="account">Profili düzenleyin</button></div>` : '';
 const isAdmin = () => !!(me?.is_admin && me.status === 'approved');
 const myPlayerId = () => (me?.status === 'approved' ? me.player_id : null);
@@ -216,11 +216,22 @@ function signupCard(sg) {
 const signupCards = () => (data.signups || []).map(signupCard).join('');
 
 // ------------------------------------------------------------------ pages
-function matchCard(m, s) {
-  const status = m.status === 'done' ? `${fmt(m.scoreA)} : ${fmt(m.scoreB)}` : m.status === 'pending' ? '<span class="badge gold">Onay</span>' : m.status === 'disputed' ? '<span class="badge red">İtiraz</span>' : `<span class="badge">${m.status === 'waiting' ? 'Bekleniyor' : 'Oynanacak'}</span>`;
-  const mine = myPlayerId() && [m.a, m.b].includes(myPlayerId());
-  return `<button type="button" data-action="match" data-id="${esc(m.id)}" class="match-row ${mine ? 'mine' : ''}"><span class="indicator ${m.status === 'done' ? 'green' : m.status === 'pending' ? 'gold' : ''}"></span><span style="flex:1;min-width:0"><span class="title">${esc(nickname(m.a))} <span class="muted">vs</span> ${esc(nickname(m.b))}</span><span class="meta">${s.id !== activeSeason()?.id ? esc(s.name) + ' · ' : ''}${esc(phaseLabel(m, s))}</span></span><span class="match-right"><span class="result">${status}</span>${icon('chevron', 15)}</span></button>`;
+/* One match as a row. With focus (a player id) the row is written from that player's side:
+   "vs opponent", and a proposed score as "Siz 402 · Rakip 330". */
+function matchCard(m, s, { focus = null } = {}) {
+  const pid = myPlayerId(), mineRow = pid && [m.a, m.b].includes(pid);
+  let status = '';
+  if (m.status === 'done') status = `<span class="result">${fmt(m.scoreA)} : ${fmt(m.scoreB)}</span>`;
+  else if (m.status === 'pending') status = `<span class="badge gold">${mineRow && m.pendingBy !== pid ? 'Onayınız bekleniyor' : 'Onay bekliyor'}</span>`;
+  else if (m.status === 'disputed') status = '<span class="badge red">İtiraz</span>';
+  else if (m.status === 'waiting') status = '<span class="badge">Bekleniyor</span>';
+  const title = focus ? `<span class="muted">vs</span> ${esc(nickname(opponentOf(m, focus)))}` : `${esc(nickname(m.a))} <span class="muted">vs</span> ${esc(nickname(m.b))}`;
+  const proposed = m.status === 'pending' && m.pendingScore
+    ? (focus ? `Siz ${m.a === focus ? m.pendingScore.a : m.pendingScore.b} · Rakip ${m.a === focus ? m.pendingScore.b : m.pendingScore.a}` : `Önerilen ${m.pendingScore.a} : ${m.pendingScore.b}`) : '';
+  const meta = [s.id !== activeSeason()?.id ? s.name : '', phaseLabel(m, s), proposed].filter(Boolean).map(esc).join(' · ');
+  return `<button type="button" data-action="match" data-id="${esc(m.id)}" class="match-row${!focus && mineRow ? ' mine' : ''}"><span class="indicator ${m.status === 'done' ? 'green' : m.status === 'pending' ? 'gold' : m.status === 'disputed' ? 'red' : ''}"></span><span class="match-main"><span class="title">${title}</span><span class="meta">${meta}</span></span><span class="match-right">${status}${icon('chevron', 15)}</span></button>`;
 }
+const miniStat = (label, value) => `<div class="mini-stat"><span class="kicker">${label}</span><b>${value}</b></div>`;
 
 function userMatches(s, pid) {
   const prio = m => m.status === 'pending' && m.pendingBy !== pid ? 0 : m.status === 'scheduled' ? 1 : m.status === 'pending' ? 2 : m.status === 'disputed' ? 3 : m.status === 'waiting' ? 4 : 5;
@@ -238,36 +249,40 @@ function recentResults(s, n = 6) {
   return list.length ? list.map(m => matchCard(m, s)).join('') : '<div class="empty">Henüz sonuç yok.</div>';
 }
 
+/* Home reads top to bottom in the order a player needs it: anything waiting on them, their next
+   games, where they stand, what just happened. On desktop the standings sit pinned on the right. */
 function homePage(s) {
   if (!s) return noSeason();
   const pid = myPlayerId(), playing = pid && s.players.includes(pid), prog = seasonProgress(s);
   const pill = `<span class="season-pill">${s.status === 'finished' ? 'Tamamlandı' : s.format === 'cup' ? 'Kupa devam ediyor' : 'Lig devam ediyor'}</span>`;
   const standing = seasonStanding(s, pid);
-  const tableCard = `<div class="card pad"><div class="section-title"><h2>${s.format === 'league' ? 'Puan durumu' : 'Grup sıralaması'}</h2><button class="linkbtn" data-nav="standings">Tamamı ${icon('right', 13)}</button></div>${tableStanding(standing.slice(0, 7), pid, true)}<div class="divider"></div><div class="flex between"><span class="muted tiny">${fmt(prog.done)} / ${fmt(prog.total)} maç tamamlandı</span><b class="tiny">%${prog.percent}</b></div><div class="track mt"><div class="fill" style="width:${prog.percent}%"></div></div></div>`;
-  const recentCard = `<div class="card pad"><div class="section-title"><h2>Son sonuçlar</h2><button class="linkbtn" data-nav="fixtures">Tüm fikstür ${icon('right', 13)}</button></div><div class="match-list">${recentResults(s)}</div></div>`;
+  const tableCard = `<div class="card pad"><div class="section-title"><h2>${s.format === 'league' ? 'Puan durumu' : 'Grup sıralaması'}</h2><button class="linkbtn" data-nav="standings">Tamamı ${icon('right', 13)}</button></div>${tableStanding(standing.slice(0, 10), pid, true)}<div class="progress-line"><span class="muted tiny">${fmt(prog.done)} / ${fmt(prog.total)} maç oynandı</span><div class="track"><div class="fill" style="width:${prog.percent}%"></div></div></div></div>`;
+  const recentCard = `<div class="card pad"><div class="section-title"><h2>Son sonuçlar</h2><button class="linkbtn" data-nav="fixtures">Tüm maçlar ${icon('right', 13)}</button></div><div class="match-list">${recentResults(s)}</div></div>`;
   const champion = s.status !== 'finished' ? null : s.bracket ? winnerOf(s.matches.find(m => m.phase === 'knockout' && m.round === Math.log2(s.bracket.size) - 1)) : s.format === 'league' ? standing[0]?.id : null;
   const championCard = champion ? `<div class="card hero mb"><div class="kicker">ŞAMPİYON</div><div class="competitor" style="margin-top:12px">${icon('trophy', 26)} ${esc(nickname(champion))}</div></div>` : '';
+  const head = title => `<div class="home-head"><div><div class="eyebrow">${esc(s.name)}</div><h1>${title}</h1></div>${pill}</div>`;
 
   if (!playing) {
     const top = [...s.players].sort((a, b) => integerRating(b) - integerRating(a)).slice(0, 5);
-    return `${header('GENEL BAKIŞ', esc(s.name), s.format === 'cup' ? 'Gruplar, eleme tablosu ve sonuçlar.' : 'Fikstür, sonuçlar ve puan durumu.', pill)}${signupCards()}${accountNotice()}${profileNudge()}
-    ${championCard}
-    <div class="layout-2 mb"><div class="stack">${recentCard}</div><div class="stack"><div class="layout-3">${stat('OYUNCU', fmt(s.players.length), 'Bu sezonda')}${stat('TAMAMLANAN', fmt(prog.done), fmt(prog.total) + ' maçtan')}${stat('ONAY BEKLEYEN', fmt(s.matches.filter(m => m.status === 'pending' || m.status === 'disputed').length), 'Sonuç')}</div>${tableCard}
-    <div class="card pad"><div class="section-title"><h2>Elo liderleri</h2><button class="linkbtn" data-nav="players">Oyuncular ${icon('right', 13)}</button></div>${top.map((id, i) => `<div class="flex between audit clickable" data-action="profile" data-id="${esc(id)}"><span><span class="rank muted">${i + 1}.</span> <b>${esc(nickname(id))}</b></span><b>${integerRating(id)}</b></div>`).join('')}</div></div></div>`;
+    const waiting = s.matches.filter(m => m.status === 'pending' || m.status === 'disputed').length;
+    const leaders = `<div class="card pad"><div class="section-title"><h2>Elo liderleri</h2><button class="linkbtn" data-nav="players">Oyuncular ${icon('right', 13)}</button></div>${top.map((id, i) => `<div class="flex between audit clickable" data-action="profile" data-id="${esc(id)}"><span><span class="rank muted">${i + 1}.</span> <b>${esc(nickname(id))}</b></span><b>${integerRating(id)}</b></div>`).join('')}</div>`;
+    return `${head('Genel bakış')}${signupCards()}${accountNotice()}${profileNudge()}${championCard}
+    <div class="stat-strip">${miniStat('Oyuncu', fmt(s.players.length))}${miniStat('Oynanan', `${fmt(prog.done)}<small>/${fmt(prog.total)}</small>`)}${miniStat('İlerleme', '%' + prog.percent)}${miniStat('Onay bekleyen', fmt(waiting))}</div>
+    <div class="home-grid"><div class="area-main">${recentCard}</div><div class="area-side stack">${tableCard}${leaders}</div></div>`;
   }
 
   const list = userMatches(s, pid), ownDone = list.filter(m => m.status === 'done').length;
   const toConfirm = list.filter(m => m.status === 'pending' && m.pendingBy !== pid);
   const open = list.filter(m => m.status === 'scheduled');
   const upcoming = list.filter(m => m.status !== 'done' && !toConfirm.includes(m));
-  const rank = standing.findIndex(x => x.id === pid) + 1, primary = toConfirm[0];
-  const hero = primary
-    ? `<div class="card hero"><div class="hero-header"><span class="kicker">Onayınızı bekleyen maç${toConfirm.length > 1 ? ` · ${toConfirm.length} adet` : ''}</span><span class="badge dark">${esc(phaseLabel(primary, s))}</span></div><div class="hero-vs"><div class="competitor"><small>${primary.a === pid ? 'SİZ' : 'RAKİBİNİZ'}</small>${esc(nickname(primary.a))}</div><span class="vs">vs</span><div class="competitor" style="text-align:right"><small>${primary.b === pid ? 'SİZ' : 'RAKİBİNİZ'}</small>${esc(nickname(primary.b))}</div></div><div class="hero-foot"><span class="hero-meta">Rakibiniz ${primary.pendingScore?.a} : ${primary.pendingScore?.b} sonucunu girdi</span><button class="btn" data-action="match" data-id="${esc(primary.id)}">Sonucu inceleyin ${icon('right', 16)}</button></div></div>`
-    : `<div class="card hero"><div class="kicker">SIRADAKİ OYUNLARINIZ</div><h2>${open.length ? `${fmt(open.length)} maçınız oynanmayı bekliyor` : 'Şimdilik oynanacak maçınız yok.'}</h2><p class="hero-meta">${open.length ? 'Sıra yok: maçlarınızı istediğiniz sırayla oynayın, biten maçın sonucunu girin.' : 'Tamamladığınız maçları fikstürden inceleyebilirsiniz.'}</p>${open.length ? `<div class="hero-foot"><span class="hero-meta">${fmt(ownDone)} / ${fmt(list.length)} maç tamamlandı</span><button class="btn" data-action="myMatches">Maçlarım ${icon('right', 16)}</button></div>` : ''}</div>`;
-  const upcomingCard = `<div class="card pad"><div class="section-title"><h2>Sıradaki oyunlarınız</h2><button class="linkbtn" data-action="myMatches">Tümü${upcoming.length ? ` (${upcoming.length})` : ''} ${icon('right', 13)}</button></div><div class="match-list">${upcoming.length ? upcoming.slice(0, 8).map(m => matchCard(m, s)).join('') : '<div class="empty">Başka maç bulunmuyor.</div>'}</div></div>`;
-  return `${header('GENEL BAKIŞ', 'Hoş geldiniz, ' + esc(me.username) + '!', 'Sezonla ilgili gelişmeleri buradan takip edebilirsiniz.', pill)}${signupCards()}${profileNudge()}${championCard}
-  <div class="layout-2 mb"><div class="stack">${hero}${upcomingCard}${recentCard}</div>
-  <div class="stack"><div class="layout-3">${stat('ELO PUANINIZ', fmt(integerRating(pid)), 'Başlangıç: 1000')}${stat('SIRALAMANIZ', rank ? '#' + rank : '−', s.format === 'cup' ? 'Grup sırası' : 'Lig sırası')}${stat('MAÇLARINIZ', fmt(ownDone), fmt(list.length) + ' toplam')}</div>${tableCard}</div></div>`;
+  const rank = standing.findIndex(x => x.id === pid) + 1;
+  const confirmCard = toConfirm.length ? `<div class="card pad action-card mb"><div class="section-title"><h2>${icon('check', 18)} Onayınızı bekleyen ${toConfirm.length > 1 ? toConfirm.length + ' sonuç' : 'sonuç'}</h2></div><div class="match-list">${toConfirm.map(m => matchCard(m, s, { focus: pid })).join('')}</div></div>` : '';
+  const upcomingCard = `<div class="card pad"><div class="section-title"><h2>Sıradaki oyunlarınız <span class="count">${upcoming.length}</span></h2><button class="linkbtn" data-action="myMatches">Tümü ${icon('right', 13)}</button></div>${upcoming.length
+    ? `<p class="muted tiny mb8">Sıra yok: istediğiniz rakiple oynayın, maç bitince sonucu girin.</p><div class="match-list two-col">${upcoming.slice(0, 10).map(m => matchCard(m, s, { focus: pid })).join('')}</div>${upcoming.length > 10 ? `<button class="linkbtn mt" data-action="myMatches">+${upcoming.length - 10} maç daha ${icon('right', 13)}</button>` : ''}`
+    : '<div class="empty">Oynanacak maçınız kalmadı.</div>'}</div>`;
+  return `${head('Merhaba, ' + esc(me.username))}${signupCards()}${profileNudge()}${championCard}
+  <div class="stat-strip">${miniStat('Elo', fmt(integerRating(pid)))}${miniStat(s.format === 'cup' ? 'Grup sırası' : 'Sıralama', rank ? '#' + rank : '−')}${miniStat('Oynanan', `${fmt(ownDone)}<small>/${fmt(list.length)}</small>`)}${miniStat('Kalan', fmt(open.length))}</div>
+  ${confirmCard}<div class="home-grid"><div class="area-main">${upcomingCard}</div><div class="area-side">${tableCard}</div><div class="area-recent">${recentCard}</div></div>`;
 }
 
 function tableStanding(rows, userId, compact = false) {
@@ -350,7 +365,7 @@ function adminPage(s) {
    <div class="card pad"><div class="section-title"><h2>Sonuç onayları ve itirazlar</h2><span class="badge gold">${issues.length}</span></div><div class="match-list">${issues.length ? issues.map(([m, x]) => matchCard(m, x)).join('') : '<div class="empty">İncelenecek maç bulunmuyor.</div>'}</div></div>
    <div class="card pad"><div class="section-title"><h2>Üyeler</h2><span class="actions"><span class="badge">${members.length}</span><button class="btn secondary small" data-action="toggleMembers" aria-expanded="${membersOpen}">${membersOpen ? 'Gizle' : 'Göster'}</button></span></div>${membersOpen ? members.map(p => `<div class="season-item row-line"><div><strong>${esc(p.username)}</strong> ${p.is_admin ? '<span class="badge blue">Yönetici</span>' : ''}<div class="tiny muted">${[p.real_name, p.grad_year && p.grad_year + ' mezunu'].filter(Boolean).map(esc).join(' · ') || 'Bilgi girilmedi'}</div></div><button class="btn secondary small" data-action="manageMember" data-id="${esc(p.id)}">Yönet</button></div>`).join('') : '<p class="muted tiny mb0">Yetki ve şifre işlemleri için listeyi açıp bir üyeyi seçin.</p>'}</div>
   </div>
-  <div class="stack"><div class="card pad"><h2 style="margin-top:0">Sezon işlemleri</h2>${s ? `<p class="muted">Aktif sezon: <b>${esc(s.name)}</b></p>` : ''}<div class="stack">${groupDone ? `<button class="btn block" data-action="createBracket">${icon('trophy', 16)} Eleme tablosunu oluşturun</button>` : ''}<button class="btn secondary block" data-action="newSignup">${icon('calendar', 16)} Sezon kaydı açın</button><button class="btn secondary block" data-action="addPlayer">${icon('plus', 16)} Hesapsız oyuncu ekleyin</button><button class="btn secondary block" data-action="exportData">JSON yedeğini dışa aktarın</button>${s ? `<button class="btn secondary block danger-text" data-action="deleteSeason" data-id="${esc(s.id)}">Bu sezonu silin</button>` : ''}</div></div>
+  <div class="stack"><div class="card pad"><h2 style="margin-top:0">Sezon işlemleri</h2>${s ? `<p class="muted">Aktif sezon: <b>${esc(s.name)}</b></p>` : ''}<div class="stack">${groupDone ? `<button class="btn block" data-action="createBracket">${icon('trophy', 16)} Eleme tablosunu oluşturun</button>` : ''}${api.features.signups ? `<button class="btn secondary block" data-action="newSignup">${icon('calendar', 16)} Sezon kaydı açın</button>` : ''}<button class="btn secondary block" data-action="addPlayer">${icon('plus', 16)} Hesapsız oyuncu ekleyin</button><button class="btn secondary block" data-action="exportData">JSON yedeğini dışa aktarın</button>${s ? `<button class="btn secondary block danger-text" data-action="deleteSeason" data-id="${esc(s.id)}">Bu sezonu silin</button>` : ''}</div></div>
   <div class="card pad"><div class="section-title"><h2>Son işlemler</h2>${icon('archive', 17)}</div>${data.audits.length ? data.audits.slice(0, 12).map(a => `<div class="audit"><div class="audit-label">${esc(a.action)}</div><div class="muted">${esc(a.actor_name || 'Sistem')} · ${longDate(a.at)}</div></div>`).join('') : '<div class="empty">Henüz işlem yok.</div>'}</div></div></div>`;
 }
 
@@ -430,7 +445,7 @@ function openMember(id) {
   const pl = p.player_id && player(p.player_id), self = p.id === me.id;
   modal(`${modalHeader(esc(p.username), p.is_admin ? '<span class="badge blue">Yönetici</span>' : 'Üye')}
   <div class="detail-summary"><div class="flex between"><span class="muted">Gerçek ad</span><b>${esc(p.real_name || '—')}</b></div><div class="flex between mt"><span class="muted">Mezuniyet</span><b>${p.grad_year || '—'}</b></div><div class="flex between mt"><span class="muted">Oyuncu profili</span><b>${pl ? esc(pl.username) : '—'}</b></div><div class="flex between mt"><span class="muted">Katılım</span><b>${longDate(p.created_at)}</b></div></div>
-  <div class="stack">${pl ? `<button class="btn secondary block" data-action="profile" data-id="${esc(pl.id)}">${icon('user', 15)} Oyuncu profilini görüntüleyin</button><button class="btn secondary block" data-action="editPlayer" data-id="${esc(pl.id)}">${icon('user', 15)} Ad ve mezuniyet yılını düzenleyin</button>` : ''}${self ? '' : `<button class="btn secondary block" data-action="toggleAdminRole" data-id="${esc(p.id)}">${icon('shield', 15)} ${p.is_admin ? 'Yöneticilikten çıkarın' : 'Yönetici yapın'}</button>`}<button class="btn secondary block" data-action="resetPassword" data-id="${esc(p.id)}">${icon('lock', 15)} Şifre sıfırlayın</button></div>`);
+  <div class="stack">${pl ? `<button class="btn secondary block" data-action="profile" data-id="${esc(pl.id)}">${icon('user', 15)} Oyuncu profilini görüntüleyin</button>${api.features.details ? `<button class="btn secondary block" data-action="editPlayer" data-id="${esc(pl.id)}">${icon('user', 15)} Ad ve mezuniyet yılını düzenleyin</button>` : ''}` : ''}${self ? '' : `<button class="btn secondary block" data-action="toggleAdminRole" data-id="${esc(p.id)}">${icon('shield', 15)} ${p.is_admin ? 'Yöneticilikten çıkarın' : 'Yönetici yapın'}</button>`}<button class="btn secondary block" data-action="resetPassword" data-id="${esc(p.id)}">${icon('lock', 15)} Şifre sıfırlayın</button></div>`);
 }
 
 function openEditPlayer(id) {
@@ -458,7 +473,7 @@ function openProfile(id) {
   const history = allMatches().filter(m => m.status === 'done' && [m.a, m.b].includes(id)).sort((a, b) => (b.finalizedAt || 0) - (a.finalizedAt || 0));
   const wins = history.filter(m => winnerOf(m) === id && m.scoreA !== m.scoreB).length, draws = history.filter(m => m.scoreA === m.scoreB).length;
   const seasonOf = m => data.seasons.find(s => s.id === m.seasonId);
-  modal(`${modalHeader('Oyuncu profili', 'Topluluk istatistikleri')}<div class="profile-intro mb"><div class="avatar">${esc(initials(p.username))}</div><div style="flex:1;min-width:0"><h2 style="margin:0">${esc(p.username)}</h2>${p.realName || p.gradYear ? `<div class="muted">${[p.realName, p.gradYear && p.gradYear + ' mezunu'].filter(Boolean).map(esc).join(' · ')}</div>` : ''}</div>${p.id === myPlayerId() ? `<button class="btn secondary small" data-action="account">Bilgilerimi düzenleyin</button>` : isAdmin() ? `<button class="btn secondary small" data-action="editPlayer" data-id="${esc(p.id)}">Bilgileri düzenleyin</button>` : ''}</div><div class="layout-3 mb">${stat('ELO', integerRating(id), '1000 başlangıç')}${stat('GALİBİYET', wins, history.length + ' maç')}${stat('MAĞLUBİYET', history.length - wins - draws, draws + ' beraberlik')}</div><div class="section-title"><h2>Son maçlar</h2></div><div class="match-list">${history.length ? history.slice(0, 10).map(m => matchCard(m, seasonOf(m))).join('') : '<div class="empty">Henüz resmî sonuç yok.</div>'}</div>`, true);
+  modal(`${modalHeader('Oyuncu profili', 'Topluluk istatistikleri')}<div class="profile-intro mb"><div class="avatar">${esc(initials(p.username))}</div><div style="flex:1;min-width:0"><h2 style="margin:0">${esc(p.username)}</h2>${p.realName || p.gradYear ? `<div class="muted">${[p.realName, p.gradYear && p.gradYear + ' mezunu'].filter(Boolean).map(esc).join(' · ')}</div>` : ''}</div>${p.id === myPlayerId() ? `<button class="btn secondary small" data-action="account">Bilgilerimi düzenleyin</button>` : isAdmin() && api.features.details ? `<button class="btn secondary small" data-action="editPlayer" data-id="${esc(p.id)}">Bilgileri düzenleyin</button>` : ''}</div><div class="layout-3 mb">${stat('ELO', integerRating(id), '1000 başlangıç')}${stat('GALİBİYET', wins, history.length + ' maç')}${stat('MAĞLUBİYET', history.length - wins - draws, draws + ' beraberlik')}</div><div class="section-title"><h2>Son maçlar</h2></div><div class="match-list">${history.length ? history.slice(0, 10).map(m => matchCard(m, seasonOf(m))).join('') : '<div class="empty">Henüz resmî sonuç yok.</div>'}</div>`, true);
 }
 
 function downloadData() {

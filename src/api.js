@@ -69,9 +69,18 @@ const toMatch = r => ({
   finalizedAt: r.finalized_at ? Date.parse(r.finalized_at) : null
 });
 
+/* Which database updates are applied. The site works without them; the related features stay hidden
+   until the migration has been run in Supabase (see supabase/migrations). */
+export const features = { details: true, signups: true };
+const isMissing = e => /does not exist|could not find|schema cache|PGRST20[025]|42703|42P01/i.test(e?.message || '');
+async function withFallback(flag, attempt, fallback) {
+  try { const result = await attempt(); features[flag] = true; return result; }
+  catch (e) { if (!isMissing(e)) throw e; features[flag] = false; return fallback(); }
+}
+
 /* Open registrations (season sign-ups) with who has joined so far. Public. */
 export async function loadSignups() {
-  const open = unwrap(await sb.from('signups').select('*').eq('status', 'open').order('closes_at'));
+  const open = await withFallback('signups', async () => unwrap(await sb.from('signups').select('*').eq('status', 'open').order('closes_at')), () => []);
   return Promise.all(open.map(async sg => ({
     id: sg.id, title: sg.title, closesAt: Date.parse(sg.closes_at),
     entries: unwrap(await sb.rpc('signup_list', { p_signup: sg.id })).map(e => ({ username: e.username, playerId: e.player_id, approved: e.approved, mine: e.mine }))
@@ -84,8 +93,8 @@ export async function loadAll({ member = false, admin = false } = {}) {
     selectAll('players', 'id, username, created_at'),
     selectAll('seasons', '*', 'created_at'),
     selectAll('matches', '*'),
-    member ? selectAll('player_private', 'player_id, real_name, grad_year', 'player_id') : [],
-    admin ? selectAll('profiles', 'id, username, username_key, real_name, grad_year, status, is_admin, player_id, created_at', 'created_at') : [],
+    member ? withFallback('details', () => selectAll('player_private', 'player_id, real_name, grad_year', 'player_id'), () => selectAll('player_private', 'player_id, real_name', 'player_id')) : [],
+    admin ? withFallback('details', () => selectAll('profiles', 'id, username, username_key, real_name, grad_year, status, is_admin, player_id, created_at', 'created_at'), () => selectAll('profiles', 'id, username, username_key, real_name, status, is_admin, player_id, created_at', 'created_at')) : [],
     admin ? unwrap(await sb.from('audit_log').select('*').order('id', { ascending: false }).limit(60)) : [],
     loadSignups()
   ]);
@@ -128,7 +137,9 @@ const call = async (fn, args) => unwrap(await sb.rpc(fn, args));
 
 export const submitScore = (id, a, b) => call('submit_score', { p_match: id, p_a: a, p_b: b });
 export const respondScore = (id, accept) => call('respond_score', { p_match: id, p_accept: accept });
-export const updateMyProfile = (realName, gradYear) => call('update_my_profile', { p_real_name: realName, p_grad_year: gradYear ?? null });
+export const updateMyProfile = (realName, gradYear) => features.details
+  ? call('update_my_profile', { p_real_name: realName, p_grad_year: gradYear ?? null })
+  : call('update_my_profile', { p_real_name: realName });
 export const adminUpdatePlayer = (id, realName, gradYear) => call('admin_update_player', { p_player: id, p_real_name: realName || null, p_grad_year: gradYear ?? null });
 
 export const adminSetScore = (id, a, b) => call('admin_set_score', { p_match: id, p_a: a, p_b: b });
