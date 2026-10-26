@@ -274,3 +274,4 @@ body.busy .modal button[type=submit],body.busy [data-action=confirmMatch],body.b
 }
 .signup-card h2{margin-top:0}
 .signup-card .chips{margin-top:14px}
+.forgot-link{display:block;margin:14px auto 0;font-size:13px}

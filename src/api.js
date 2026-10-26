@@ -71,7 +71,7 @@ const toMatch = r => ({
 
 /* Which database updates are applied. The site works without them; the related features stay hidden
    until the migration has been run in Supabase (see supabase/migrations). */
-export const features = { details: true, signups: true };
+export const features = { details: true, signups: true, resets: true };
 const isMissing = e => /does not exist|could not find|schema cache|PGRST20[025]|42703|42P01/i.test(e?.message || '');
 async function withFallback(flag, attempt, fallback) {
   try { const result = await attempt(); features[flag] = true; return result; }
@@ -89,14 +89,15 @@ export async function loadSignups() {
 
 /* Everything public, plus member/admin-only extras when the session allows them (RLS filters the rest). */
 export async function loadAll({ member = false, admin = false } = {}) {
-  const [players, seasons, matches, names, profiles, audits, signups] = await Promise.all([
+  const [players, seasons, matches, names, profiles, audits, signups, resets] = await Promise.all([
     selectAll('players', 'id, username, created_at'),
     selectAll('seasons', '*', 'created_at'),
     selectAll('matches', '*'),
     member ? withFallback('details', () => selectAll('player_private', 'player_id, real_name, grad_year', 'player_id'), () => selectAll('player_private', 'player_id, real_name', 'player_id')) : [],
     admin ? withFallback('details', () => selectAll('profiles', 'id, username, username_key, real_name, grad_year, status, is_admin, player_id, created_at', 'created_at'), () => selectAll('profiles', 'id, username, username_key, real_name, status, is_admin, player_id, created_at', 'created_at')) : [],
     admin ? unwrap(await sb.from('audit_log').select('*').order('id', { ascending: false }).limit(60)) : [],
-    loadSignups()
+    loadSignups(),
+    admin ? withFallback('resets', async () => unwrap(await sb.from('password_requests').select('*').order('created_at')), () => []) : []
   ]);
   const details = new Map(names.map(n => [n.player_id, n]));
   const bySeason = new Map(seasons.map(s => [s.id, []]));
@@ -109,8 +110,16 @@ export async function loadAll({ member = false, admin = false } = {}) {
       createdAt: s.created_at,
       matches: (bySeason.get(s.id) || []).sort((x, y) => x.phase.localeCompare(y.phase) || x.round - y.round || (x.slot ?? 0) - (y.slot ?? 0))
     })),
-    profiles, audits, signups
+    profiles, audits, signups, resets
   };
+}
+
+/* Admins only: open "forgot password" requests (0 until that migration is applied). */
+export async function pendingResetCount() {
+  if (!features.resets) return 0;
+  const { count, error } = await sb.from('password_requests').select('id', { count: 'exact', head: true });
+  if (error) throw friendly(error);
+  return count ?? 0;
 }
 
 /* Admins only (RLS hides other accounts): how many accounts wait for approval. */
@@ -160,6 +169,9 @@ export const signupJoin = id => call('signup_join', { p_signup: id });
 export const signupWithdraw = id => call('signup_withdraw', { p_signup: id });
 export const adminSaveSignup = (id, title, closesAt) => call('admin_save_signup', { p_signup: id || null, p_title: title, p_closes_at: closesAt });
 export const adminCloseSignup = (id, seasonId) => call('admin_close_signup', { p_signup: id, p_season: seasonId || null });
+export const requestPasswordReset = (username, note) => call('request_password_reset', { p_username: normalizeUsername(username), p_note: note || null });
+export const adminClearPasswordRequest = id => call('admin_clear_password_request', { p_id: id });
+export async function changePassword(password) { unwrap(await sb.auth.updateUser({ password })); }
 export const adminResetPassword = (id, password) => call('admin_reset_password', { p_profile: id, p_password: password });
 
 export const crestUrl = config.CREST_URL || (configured ? config.SUPABASE_URL.replace(/\/$/, '') + '/storage/v1/object/public/branding/crest.png' : '');

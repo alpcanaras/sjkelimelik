@@ -6,7 +6,7 @@ import { pgcrypto } from '/node_modules/@electric-sql/pglite/dist/contrib/pgcryp
 import { usernameKey, loginLocal, normalizeUsername, planSeason } from './engine.js';
 
 const DOMAIN = 'kullanici.sjkelimelik.invalid';
-const MIGRATIONS = ['20261017000000_init.sql', '20261018000000_username_symbols.sql', '20261023000000_profile_details.sql', '20261025000000_username_spaces.sql', '20261025100000_signups.sql'];
+const MIGRATIONS = ['20261017000000_init.sql', '20261018000000_username_symbols.sql', '20261023000000_profile_details.sql', '20261025000000_username_spaces.sql', '20261025100000_signups.sql', '20261026000000_password_requests.sql'];
 const SESSION_KEY = 'fake-session';
 const STUB = `
   create role anon nologin; create role authenticated nologin; create role supabase_auth_admin nologin;
@@ -68,7 +68,7 @@ const ready = (async () => {
 })();
 
 export const configured = true;
-export const features = { details: true, signups: true };
+export const features = { details: true, signups: true, resets: true };
 export const crestUrl = 'assets/saint-joseph-crest-cropped.png';
 
 export async function getSession() { await ready; return uid ? { user: { id: uid } } : null; }
@@ -109,14 +109,15 @@ export async function loadSignups() {
 export async function loadAll({ member = false, admin = false } = {}) {
   await ready;
   const q = sql => as(uid, sql);
-  const [players, seasons, matches, names, profiles, audits, signups] = await Promise.all([
+  const [players, seasons, matches, names, profiles, audits, signups, resets] = await Promise.all([
     q('select id, username, created_at from public.players order by id'),
     q('select * from public.seasons order by created_at'),
     q('select * from public.matches order by id'),
     member ? q('select player_id, real_name, grad_year from public.player_private') : [],
     admin ? q('select id, username, username_key, real_name, grad_year, status, is_admin, player_id, created_at from public.profiles order by created_at') : [],
     admin ? q('select * from public.audit_log order by id desc limit 60') : [],
-    loadSignups()
+    loadSignups(),
+    admin ? q('select * from public.password_requests order by created_at') : []
   ]);
   const details = new Map(names.map(n => [n.player_id, n]));
   return {
@@ -127,10 +128,13 @@ export async function loadAll({ member = false, admin = false } = {}) {
       matches: matches.filter(m => m.season_id === s.id).map(toMatch)
         .sort((x, y) => x.phase.localeCompare(y.phase) || x.round - y.round || (x.slot ?? 0) - (y.slot ?? 0))
     })),
-    profiles, audits, signups
+    profiles, audits, signups, resets
   };
 }
 export function subscribe() {}
+export async function pendingResetCount() {
+  return Number((await as(uid, 'select count(*) as n from public.password_requests'))[0].n);
+}
 export async function pendingProfileCount() {
   return Number((await as(uid, `select count(*) as n from public.profiles where status = 'pending'`))[0].n);
 }
@@ -164,4 +168,7 @@ export const signupJoin = id => call('signup_join', { p_signup: id });
 export const signupWithdraw = id => call('signup_withdraw', { p_signup: id });
 export const adminSaveSignup = (id, title, closesAt) => call('admin_save_signup', { p_signup: id || null, p_title: title, p_closes_at: closesAt });
 export const adminCloseSignup = (id, seasonId) => call('admin_close_signup', { p_signup: id, p_season: seasonId || null });
+export const requestPasswordReset = (username, note) => call('request_password_reset', { p_username: normalizeUsername(username), p_note: note || null });
+export const adminClearPasswordRequest = id => call('admin_clear_password_request', { p_id: id });
+export async function changePassword(password) { await db.query(`update auth.users set encrypted_password = extensions.crypt($1, extensions.gen_salt('bf')) where id = $2`, [password, uid]); }
 export const adminResetPassword = (id, password) => call('admin_reset_password', { p_profile: id, p_password: password });

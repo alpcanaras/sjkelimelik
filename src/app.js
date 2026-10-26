@@ -7,7 +7,7 @@ import { ratings, rankings, planSeason, planKnockout, knockoutLabel, START_ELO, 
 const THEME_KEY = 'sj-kelimelik-theme';
 const SEASON_KEY = 'sj-kelimelik-season';
 
-let data = { players: [], seasons: [], profiles: [], audits: [], signups: [] };
+let data = { players: [], seasons: [], profiles: [], audits: [], signups: [], resets: [] };
 let joinAfterAuth = null; // sign-up the visitor asked to join before logging in
 let session = null, me = null, loaded = false, busy = false, eloCache = null;
 let view = 'home', fixtureFilter = null, fixturePlayer = 'all', membersOpen = false;
@@ -121,7 +121,7 @@ const visibleNav = () => navItems.filter(n => n[0] !== 'admin' || isAdmin());
 function actionCounts() {
   const pid = myPlayerId(), matches = allMatches();
   const fixtures = pid ? matches.filter(m => m.status === 'pending' && m.pendingBy !== pid && (m.a === pid || m.b === pid)).length : 0;
-  const admin = isAdmin() ? data.profiles.filter(p => p.status === 'pending').length + matches.filter(m => m.status === 'disputed').length : 0;
+  const admin = isAdmin() ? data.profiles.filter(p => p.status === 'pending').length + matches.filter(m => m.status === 'disputed').length + (data.resets?.length || 0) : 0;
   return { fixtures, admin, total: fixtures + admin };
 }
 function navButton([key, label, ic, short], mobile = false, counts = {}) {
@@ -353,6 +353,7 @@ function adminPage(s) {
   return `${header('YÖNETİM', 'Yönetici paneli', 'Hesaplar, müsabakalar ve sonuç incelemeleri.', `<button class="btn" data-action="createSeason">${icon('plus', 16)} Yeni organizasyon</button>`)}
   <div class="layout-3 mb">${stat('ONAY BEKLEYEN', pending.length, 'Hesap başvurusu')}${stat('SONUÇ İŞLEMLERİ', issues.length, 'Onay veya itiraz')}${stat('TAMAMLANAN', s ? completedCount(s) : 0, 'Bu sezondaki maçlar')}</div>
   <div class="layout-2 mb"><div class="stack">
+   ${data.resets?.length ? `<div class="card pad action-card"><div class="section-title"><h2>${icon('lock', 17)} Şifre talepleri</h2><span class="badge gold">${data.resets.length}</span></div>${data.resets.map(r => { const pr = data.profiles.find(x => x.id === r.profile_id); return `<div class="season-item row-line"><div><strong>${esc(pr?.username || '?')}</strong><div class="tiny muted">${r.note ? esc(r.note) + ' · ' : ''}${longDate(r.created_at)}</div></div><div class="actions"><button class="btn small" data-action="resetPassword" data-id="${esc(r.profile_id)}">Şifre belirle</button><button class="btn secondary small" data-action="clearReset" data-id="${r.id}">Sil</button></div></div>`; }).join('')}</div>` : ''}
    <div class="card pad"><div class="section-title"><h2>Hesap başvuruları</h2><span class="badge">${pending.length} bekleyen</span></div>${pending.length ? pending.map(p => `<div class="season-item row-line"><div><strong>${esc(p.username)}</strong> ${(data.signups || []).some(sg => sg.entries.some(e => e.username === p.username)) ? '<span class="badge gold">Turnuvaya kayıtlı</span>' : ''}<div class="tiny muted">${p.real_name ? esc(p.real_name) + ' · ' : ''}${longDate(p.created_at)}</div></div><div class="actions"><button class="btn soft small" data-action="approveProfile" data-id="${esc(p.id)}">Onayla</button><button class="btn secondary small" data-action="rejectProfile" data-id="${esc(p.id)}">Reddet</button></div></div>`).join('') : '<div class="empty">Yeni başvuru bulunmuyor.</div>'}</div>
    <div class="card pad"><div class="section-title"><h2>Sonuç onayları ve itirazlar</h2><span class="badge gold">${issues.length}</span></div><div class="match-list">${issues.length ? issues.map(([m, x]) => matchCard(m, x)).join('') : '<div class="empty">İncelenecek maç bulunmuyor.</div>'}</div></div>
    <div class="card pad"><div class="section-title"><h2>Üyeler</h2><span class="actions"><span class="badge">${members.length}</span><button class="btn secondary small" data-action="toggleMembers" aria-expanded="${membersOpen}">${membersOpen ? 'Gizle' : 'Göster'}</button></span></div>${membersOpen ? members.map(p => `<div class="season-item row-line"><div><strong>${esc(p.username)}</strong> ${p.is_admin ? '<span class="badge blue">Yönetici</span>' : ''}<div class="tiny muted">${[p.real_name, p.grad_year && p.grad_year + ' mezunu'].filter(Boolean).map(esc).join(' · ') || 'Bilgi girilmedi'}</div></div><button class="btn secondary small" data-action="manageMember" data-id="${esc(p.id)}">Yönet</button></div>`).join('') : '<p class="muted tiny mb0">Yetki ve şifre işlemleri için listeyi açıp bir üyeyi seçin.</p>'}</div>
@@ -376,7 +377,7 @@ function openAuth(mode = 'login') {
    ${signup ? '<div class="field"><label for="authName">Gerçek ad (isteğe bağlı)</label><input class="input" id="authName" name="realName" autocomplete="name" maxlength="80"><small>Yalnızca onaylı üyeler görür.</small></div>' + yearField('authYear') : ''}
    <div class="field"><label for="authPass">Şifre</label><input class="input" id="authPass" name="password" type="password" autocomplete="${signup ? 'new-password' : 'current-password'}" required minlength="${signup ? 8 : 1}">${signup ? '<small>En az 8 karakter. Şifrenizi unutursanız bir yönetici sıfırlayabilir.</small>' : ''}</div>
    ${signup ? '<div class="field"><label for="authPass2">Şifre (tekrar)</label><input class="input" id="authPass2" name="password2" type="password" autocomplete="new-password" required minlength="8"></div>' : ''}
-  </div>${formActions(signup ? 'Hesap oluşturun' : 'Giriş yapın')}</form>`);
+  </div>${formActions(signup ? 'Hesap oluşturun' : 'Giriş yapın')}${signup ? '' : '<button type="button" class="linkbtn forgot-link" data-action="forgot">Şifremi unuttum</button>'}</form>`);
 }
 
 function openAccount() {
@@ -386,7 +387,7 @@ function openAccount() {
   <div class="flex between mb"><span>${status} ${isAdmin() ? '<span class="badge blue">Yönetici</span>' : ''}</span>${p ? `<button class="linkbtn" data-action="profile" data-id="${esc(p.id)}">Oyuncu profilim ${icon('right', 13)}</button>` : ''}</div>
   <form id="accountForm"><div class="field"><label for="accName">Gerçek ad (isteğe bağlı)</label><input class="input" id="accName" name="realName" maxlength="80" value="${esc(me?.real_name || '')}"><small>Yalnızca onaylı üyeler görür. Herkese açık sayfalarda yalnızca kullanıcı adınız görünür.</small></div>
   <div class="mt">${yearField('accYear', me?.grad_year)}</div>
-  <div class="form-actions"><button type="button" class="btn secondary" data-action="logout">Çıkış yapın</button><button class="btn" type="submit">Kaydedin</button></div></form>`);
+  <div class="form-actions"><button type="button" class="btn secondary" data-action="changePassword">${icon('lock', 15)} Şifre değiştir</button><button type="button" class="btn secondary" data-action="logout">Çıkış yapın</button><button class="btn" type="submit">Kaydedin</button></div></form>`);
 }
 
 const scoreForm = (m, override = false) => `<form id="scoreForm"><input type="hidden" name="match" value="${esc(m.id)}"><input type="hidden" name="override" value="${override ? '1' : ''}"><div class="score-entry"><div class="field"><label for="scoreA">${esc(nickname(m.a))}</label><input class="input" type="number" inputmode="numeric" name="scoreA" id="scoreA" min="0" max="9999" required value="${m.pendingScore?.a ?? m.scoreA ?? ''}" placeholder="000"></div><div class="sep">:</div><div class="field"><label for="scoreB">${esc(nickname(m.b))}</label><input class="input" type="number" inputmode="numeric" name="scoreB" id="scoreB" min="0" max="9999" required value="${m.pendingScore?.b ?? m.scoreB ?? ''}" placeholder="000"></div></div>${formActions((override ? 'Sonucu kesinleştirin' : 'Sonucu onaya gönderin') + ' ' + icon('right', 15))}</form>`;
@@ -453,6 +454,16 @@ function openSignupForm(id) {
   <form id="signupWindowForm"><input type="hidden" name="signup" value="${esc(sg?.id || '')}"><div class="stack"><div class="field"><label for="swTitle">Turnuva adı</label><input class="input" id="swTitle" name="title" minlength="3" maxlength="70" required value="${esc(sg?.title || '')}" placeholder="ör. 2027 Bahar Ligi"></div><div class="field"><label for="swClose">Son kayıt (Türkiye saati)</label><input class="input" id="swClose" name="closesAt" type="datetime-local" required value="${deadline}"></div></div>${formActions('Kaydedin')}</form>`);
 }
 
+function openForgot() {
+  modal(`${modalHeader('Şifremi unuttum')}
+  <form id="forgotForm"><div class="stack"><div class="field"><label for="fgUser">Kullanıcı adı</label><input class="input" id="fgUser" name="username" autocapitalize="none" spellcheck="false" required maxlength="20" value="${esc($('#authUser')?.value || '')}"></div><div class="field"><label for="fgNote">Not (isteğe bağlı)</label><input class="input" id="fgNote" name="note" maxlength="120" placeholder="ör. WhatsApp adınız"></div></div>${formActions('Gönder')}</form>`);
+}
+
+function openChangePassword() {
+  modal(`${modalHeader('Şifre değiştir')}
+  <form id="changePasswordForm"><div class="stack"><div class="field"><label for="cpPass">Yeni şifre</label><input class="input" id="cpPass" name="password" type="password" autocomplete="new-password" minlength="8" required></div><div class="field"><label for="cpPass2">Yeni şifre (tekrar)</label><input class="input" id="cpPass2" name="password2" type="password" autocomplete="new-password" minlength="8" required></div></div>${formActions('Kaydet')}</form>`);
+}
+
 function openResetPassword(id) {
   const p = data.profiles.find(x => x.id === id); if (!p) return;
   const suggestion = Array.from(crypto.getRandomValues(new Uint32Array(10)), n => 'abcdefghjkmnpqrstuvwxyz23456789'[n % 31]).join('');
@@ -497,6 +508,9 @@ function action(name, id) {
     case 'toggleAdminRole': { const p = data.profiles.find(x => x.id === id); return p && confirm(p.is_admin ? `${p.username} yöneticilikten çıkarılsın mı?` : `${p.username} yönetici yapılsın mı? Tüm yönetici işlemlerini yapabilecek.`) && run(() => api.adminSetAdmin(id, !p.is_admin), 'Yetki güncellendi.'); }
     case 'resetPassword': return openResetPassword(id);
     case 'manageMember': return openMember(id);
+    case 'forgot': return openForgot();
+    case 'changePassword': return openChangePassword();
+    case 'clearReset': return run(() => api.adminClearPasswordRequest(Number(id)), 'Talep silindi.');
     case 'signupJoin':
       if (!session) { joinAfterAuth = id; return openAuth('signup'); }
       return run(() => api.signupJoin(id), () => me?.status === 'approved' ? 'Turnuvaya katıldınız!' : 'Turnuvaya katıldınız! Hesabınız onaylanınca kadroya eklenebilirsiniz.');
@@ -573,6 +587,19 @@ function handleSubmit(e) {
       if (!at) throw Error('Son kayıt zamanını girin.');
       return run(() => api.adminSaveSignup(str('signup') || null, title, fromTrInput(at)), 'Kayıt kaydedildi.');
     }
+    if (f.id === 'forgotForm') {
+      const username = str('username');
+      if (!username) throw Error('Kullanıcı adınızı girin.');
+      return run(async () => {
+        try { await api.requestPasswordReset(username, str('note')); }
+        catch (e) { if (/could not find|schema cache/i.test(e.message)) throw Error('Bir yöneticiye yazın, şifrenizi sıfırlasın.'); throw e; }
+      }, 'Talebiniz yöneticilere iletildi.');
+    }
+    if (f.id === 'changePasswordForm') {
+      if (String(d.get('password')).length < 8) throw Error('Şifre en az 8 karakter olmalı.');
+      if (d.get('password') !== d.get('password2')) throw Error('Şifreler eşleşmiyor.');
+      return run(() => api.changePassword(String(d.get('password'))), 'Şifreniz değiştirildi.');
+    }
     if (f.id === 'approveForm') return run(() => api.approveProfile(str('profile'), str('player') || null), 'Hesap onaylandı.');
     if (f.id === 'resetForm') return run(() => api.adminResetPassword(str('profile'), String(d.get('password'))), 'Şifre değiştirildi. Yeni şifreyi kişiye iletin.');
     if (f.id === 'addPlayerForm') {
@@ -640,7 +667,10 @@ async function start() {
   }, 30000);
   setInterval(async () => {
     if (!isAdmin() || busy || document.visibilityState !== 'visible') return;
-    try { if (await api.pendingProfileCount() !== data.profiles.filter(p => p.status === 'pending').length) await refresh(); }
+    try {
+      const [accounts, resets] = await Promise.all([api.pendingProfileCount(), api.pendingResetCount()]);
+      if (accounts !== data.profiles.filter(p => p.status === 'pending').length || resets !== (data.resets?.length || 0)) await refresh();
+    }
     catch (e) { console.error(e); }
   }, 45000);
   document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && !busy) refresh().catch(console.error); });

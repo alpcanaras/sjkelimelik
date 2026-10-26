@@ -298,3 +298,21 @@ test('signups: join / withdraw until the deadline, enforced by the database; lis
   await rpc(u.alp, 'admin_close_signup', [sg, null]);
   assert.equal((await db.query('select status from public.signups where id=$1', [sg])).rows[0].status, 'closed');
 });
+
+test('forgotten passwords: anyone can request, only admins see requests, setting a password closes it', async () => {
+  await rpc(null, 'request_password_reset', ['MEHMET', 'whatsapp: mehmet']);
+  await rpc(null, 'request_password_reset', ['mehmet', 'tekrar']); // a repeat refreshes, no duplicate
+  await rpc(null, 'request_password_reset', ['boyle_biri_yok', null]); // unknown names are ignored silently
+  assert.equal((await as(null, 'select * from public.password_requests')).length, 0, 'visitors see nothing');
+  assert.equal((await as(u['Ayşe'], 'select * from public.password_requests')).length, 0, 'members see nothing');
+  const reqs = await as(u.alp, 'select * from public.password_requests');
+  assert.equal(reqs.length, 1);
+  assert.equal(reqs[0].note, 'tekrar');
+  await rpc(u.alp, 'admin_reset_password', [u.mehmet, 'yepyeni-2026']);
+  assert.equal((await as(u.alp, 'select * from public.password_requests')).length, 0, 'reset closes the request');
+  await rpc(null, 'request_password_reset', ['mehmet', null]);
+  const [r] = await as(u.alp, 'select id from public.password_requests');
+  await assert.rejects(rpc(u.mehmet, 'admin_clear_password_request', [r.id]), /yönetici/);
+  await rpc(u.alp, 'admin_clear_password_request', [r.id]);
+  assert.equal((await as(u.alp, 'select * from public.password_requests')).length, 0);
+});
